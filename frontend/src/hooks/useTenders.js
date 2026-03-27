@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tenderAPI } from '../services/api';
+import { getTenderOrganization } from '../utils/helpers';
 
 const DAYS_WINDOW = 30;
 
@@ -19,11 +20,17 @@ const formatDateLabel = (value) => {
 
 const normalizeTender = (tender) => ({
 	...tender,
+	organization: getTenderOrganization(tender),
 	deadlineLabel: formatDateLabel(tender.deadline),
 	priority: tender.priority || 'Low',
 	value: tender.value || 'N/A',
 	status: tender.status || 'new',
 });
+
+const asTime = (value) => {
+	const ts = new Date(value).getTime();
+	return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
+};
 
 const isWithinRecentWindow = (deadline, days = DAYS_WINDOW) => {
 	if (!deadline) return false;
@@ -63,7 +70,7 @@ export default function useTenders() {
 			const recent = payload.filter((item) => isWithinRecentWindow(item?.deadline));
 			const keywordRecent = recent.filter(hasKeywordTrace);
 			const effective = (keywordRecent.length > 0 ? keywordRecent : recent)
-				.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+				.sort((a, b) => asTime(a.deadline) - asTime(b.deadline));
 
 			setTenders(effective.map(normalizeTender));
 

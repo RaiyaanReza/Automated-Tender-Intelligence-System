@@ -1,19 +1,7 @@
 import { Building2, Clock, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import useTenders from '../../hooks/useTenders';
-
-const EGP_BASE = 'https://www.eprocure.gov.bd/resources/common/';
-
-const normalizeLink = (value) => {
-  const link = String(value || '').trim();
-  if (!link) return '';
-  if (link.startsWith('http://') || link.startsWith('https://')) return link;
-  try {
-    return new URL(link, EGP_BASE).toString();
-  } catch {
-    return '';
-  }
-};
+import { getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
 
 const Tenders = () => {
   const { tenders, loading, error } = useTenders();
@@ -37,7 +25,9 @@ const Tenders = () => {
       ) : null}
 
       <div className="space-y-4">
-        {tenders.map((tender) => (
+        {tenders.map((tender) => {
+          const sourceLink = resolveTenderSourceUrl(tender);
+          return (
           <div key={tender.id} className="p-5 bg-base-300 rounded-xl border border-white/10">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -47,7 +37,7 @@ const Tenders = () => {
                 <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-gray-400">
                   <span className="inline-flex items-center gap-1">
                     <Building2 className="h-4 w-4" />
-                    {tender.organization || 'Unknown organization'}
+                    {getTenderOrganization(tender)}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Clock className="h-4 w-4 text-amber-400" />
@@ -62,9 +52,9 @@ const Tenders = () => {
                       {tender.ai_summary.keyword}
                     </span>
                   ) : null}
-                  {normalizeLink(tender?.ai_summary?.source_url || tender?.ai_summary?.detail_url) ? (
+                  {sourceLink ? (
                     <a
-                      href={normalizeLink(tender?.ai_summary?.source_url || tender?.ai_summary?.detail_url)}
+                      href={sourceLink}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs text-gray-300 hover:text-cyan-300 underline"
@@ -79,7 +69,8 @@ const Tenders = () => {
               </span>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

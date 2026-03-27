@@ -43,26 +43,32 @@ const Modal = ({
   }[size];
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {isOpen && (
         <>
           <motion.div
             className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+            animate={{ opacity: 1, backdropFilter: 'blur(3px)' }}
+            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
             onClick={closeOnBackdrop ? onClose : undefined}
           />
 
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
             <motion.div
               role="dialog"
               aria-modal="true"
               aria-label={title}
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              initial={{ opacity: 0, y: 32, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              exit={{ opacity: 0, y: 20, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.85 }}
               className={`w-full ${sizeClass} max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b10]/95 shadow-2xl shadow-red-900/20`}
               onClick={(event) => event.stopPropagation()}
             >
@@ -85,7 +91,7 @@ const Modal = ({
 
               {footer ? <div className="border-t border-white/10 px-5 py-4 sm:px-6">{footer}</div> : null}
             </motion.div>
-          </div>
+          </motion.div>
         </>
       )}
     </AnimatePresence>

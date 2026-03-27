@@ -4,16 +4,19 @@ import { motion } from 'framer-motion';
 import {
   ArrowUpRight,
   Building2,
+  CalendarClock,
   CheckCircle,
   Clock,
   DollarSign,
-  TrendingUp, 
+  ExternalLink,
   FileText,
   Target,
+  TrendingUp,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Modal from '../../components/ui/Modal';
 import useTenders from '../../hooks/useTenders';
+import { formatDateTimeLabel, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
 
 const DashboardView = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -63,7 +66,6 @@ const DashboardView = () => {
       borderColor: 'border-blue-500/20',
     },
   ];
-  const recentTenders = tenders.slice(0, 5);
 
   const quickActions = useMemo(
     () => [
@@ -92,9 +94,11 @@ const DashboardView = () => {
     },
   };
 
+  const recentTenders = tenders.slice(0, 5);
+  const selectedTenderLink = selectedTender ? resolveTenderSourceUrl(selectedTender) : '';
+
   return (
     <div className="space-y-8">
-      {/* Header Section */}
       <motion.div
         initial={{ y: -30, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -131,7 +135,6 @@ const DashboardView = () => {
         </motion.button>
       </motion.div>
 
-      {/* Stats Grid */}
       <motion.div
         variants={containerVariants}
         initial="hidden"
@@ -145,44 +148,37 @@ const DashboardView = () => {
             whileHover={{ y: -8, scale: 1.02 }}
             className="stat-card cursor-pointer group"
           >
-            <div className="flex items-start justify-between mb-4">
+            <div className="mb-4 flex items-start justify-between">
               <motion.div
                 whileHover={{ scale: 1.1, rotate: 5 }}
-                className={`p-4 rounded-2xl ${stat.bg} border ${stat.borderColor}`}
+                className={`rounded-2xl border p-4 ${stat.bg} ${stat.borderColor}`}
               >
-                <stat.icon className={`h-6 w-6 sm:h-7 sm:w-7 bg-gradient-to-r ${stat.color} text-white`} />
+                <stat.icon className={`h-6 w-6 bg-gradient-to-r text-white sm:h-7 sm:w-7 ${stat.color}`} />
               </motion.div>
-              <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
-                stat.trend === 'up'
-                  ? 'bg-emerald-500/10 text-emerald-400'
-                  : 'bg-red-500/10 text-red-400'
+              <div className={`flex items-center gap-1 rounded-full px-3 py-1 text-sm font-medium ${
+                stat.trend === 'up' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
               }`}>
                 {stat.trend === 'up' ? '↑' : '↓'}
                 {stat.change}
               </div>
             </div>
 
-            <motion.h3
-              className="mb-1 text-3xl font-bold text-white sm:text-4xl"
-              whileHover={{ scale: 1.05 }}
-            >
+            <motion.h3 className="mb-1 text-3xl font-bold text-white sm:text-4xl" whileHover={{ scale: 1.05 }}>
               {stat.value}
             </motion.h3>
-            <p className="text-gray-400 text-sm">{stat.label}</p>
-            
-            <div className="mt-4 pt-4 border-t border-white/5">
-              <div className="flex items-center gap-2 text-sm text-gray-500 group-hover:text-red-400 transition-colors">
+            <p className="text-sm text-gray-400">{stat.label}</p>
+
+            <div className="mt-4 border-t border-white/5 pt-4">
+              <div className="flex items-center gap-2 text-sm text-gray-500 transition-colors group-hover:text-red-400">
                 <span>View details</span>
-                <ArrowUpRight className="w-4 h-4" />
+                <ArrowUpRight className="h-4 w-4" />
               </div>
             </div>
           </motion.div>
         ))}
       </motion.div>
 
-      {/* Two Column Layout */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-8">
-        {/* Recent Tenders */}
         <motion.div
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -192,92 +188,91 @@ const DashboardView = () => {
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="mb-1 text-xl font-bold text-white sm:text-2xl">Recent Tenders</h2>
-              <p className="text-gray-400 text-sm">Latest opportunities for you</p>
+              <p className="text-sm text-gray-400">Latest opportunities for you</p>
             </div>
-            <Link to="/tenders" className="text-red-400 hover:text-red-300 text-sm font-medium flex items-center gap-1 transition-colors">
+            <Link to="/tenders" className="flex items-center gap-1 text-sm font-medium text-red-400 transition-colors hover:text-red-300">
               View All
-              <ArrowUpRight className="w-4 h-4" />
+              <ArrowUpRight className="h-4 w-4" />
             </Link>
           </div>
 
-          {loading ? (
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-              Loading tenders from backend...
-            </div>
-          ) : null}
-
-          {error ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-              {error}
-            </div>
-          ) : null}
-
+          {loading ? <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">Loading tenders from backend...</div> : null}
+          {error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{error}</div> : null}
           {!loading && !error && recentTenders.length === 0 ? (
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-              No tenders found in database.
-            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">No tenders found in database.</div>
           ) : null}
 
           <div className="space-y-4">
-            {recentTenders.map((tender, index) => (
-              <motion.div
-                key={tender.id}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.5 + (index * 0.1) }}
-                whileHover={{ x: 8 }}
-                className="tender-card cursor-pointer group"
-                onClick={() => setSelectedTender(tender)}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
-                      <h4 className="text-base sm:text-lg text-white font-semibold group-hover:text-red-400 transition-colors">
-                        {tender.title}
-                      </h4>
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        tender.priority === 'Urgent'
-                          ? 'bg-red-500/20 text-red-400'
-                          : tender.priority === 'High'
-                          ? 'bg-orange-500/20 text-orange-400'
-                          : 'bg-blue-500/20 text-blue-400'
-                      }`}>
-                        {tender.priority}
-                      </span>
-                    </div>
-                    
-                    <div className="mb-3 flex items-center gap-4 text-sm text-gray-400">
-                      <div className="flex items-center gap-1">
-                        <Building2 className="w-4 h-4" />
-                        <span>{tender.organization}</span>
+            {recentTenders.map((tender, index) => {
+              const sourceLink = resolveTenderSourceUrl(tender);
+              return (
+                <motion.div
+                  key={tender.id}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.5 + index * 0.1 }}
+                  whileHover={{ x: 8 }}
+                  className="tender-card group cursor-pointer"
+                  onClick={() => setSelectedTender(tender)}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
+                        <h4 className="text-base font-semibold text-white transition-colors group-hover:text-red-400 sm:text-lg">{tender.title}</h4>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          tender.priority === 'Urgent'
+                            ? 'bg-red-500/20 text-red-400'
+                            : tender.priority === 'High'
+                            ? 'bg-orange-500/20 text-orange-400'
+                            : 'bg-blue-500/20 text-blue-400'
+                        }`}>
+                          {tender.priority}
+                        </span>
+                      </div>
+
+                      <div className="mb-3 flex items-center gap-4 text-sm text-gray-400">
+                        <div className="flex items-center gap-1">
+                          <Building2 className="h-4 w-4" />
+                          <span>{getTenderOrganization(tender)}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-sm sm:gap-6">
+                        <div className="flex items-center gap-2 text-gray-400">
+                          <Clock className="h-4 w-4 text-amber-400" />
+                          <span>{tender.deadlineLabel}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-400">
+                          <DollarSign className="h-4 w-4 text-emerald-400" />
+                          <span>{tender.value}</span>
+                        </div>
+                        {sourceLink ? (
+                          <a
+                            href={sourceLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-xs text-cyan-300 underline hover:text-cyan-200"
+                          >
+                            Open Source <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : null}
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-sm">
-                      <div className="flex items-center gap-2 text-gray-400">
-                        <Clock className="w-4 h-4 text-amber-400" />
-                        <span>{tender.deadlineLabel}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-gray-400">
-                        <DollarSign className="w-4 h-4 text-emerald-400" />
-                        <span>{tender.value}</span>
-                      </div>
-                    </div>
+                    <motion.div
+                      whileHover={{ scale: 1.1 }}
+                      className="gradient-red hidden h-10 w-10 items-center justify-center rounded-xl opacity-0 transition-opacity group-hover:opacity-100 sm:flex"
+                    >
+                      <ArrowUpRight className="h-5 w-5 text-white" />
+                    </motion.div>
                   </div>
-
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    className="hidden sm:flex h-10 w-10 rounded-xl gradient-red items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <ArrowUpRight className="w-5 h-5 text-white" />
-                  </motion.div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
         </motion.div>
 
-        {/* Quick Actions / Activity */}
         <motion.div
           initial={{ y: 30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -292,38 +287,35 @@ const DashboardView = () => {
                 key={action.label}
                 initial={{ x: 20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.6 + (index * 0.1) }}
+                transition={{ delay: 0.6 + index * 0.1 }}
                 whileHover={{ x: 5, scale: 1.02 }}
                 type="button"
                 onClick={() => setSelectedQuickAction(action)}
-                className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5 hover:border-red-500/30 hover:bg-white/10 transition-all group"
+                className="group flex w-full items-center gap-3 rounded-xl border border-white/5 bg-white/5 p-4 transition-all hover:border-red-500/30 hover:bg-white/10"
               >
-                <div className={`p-2 rounded-lg ${action.bg}`}>
-                  <action.icon className={`w-5 h-5 ${action.color}`} />
+                <div className={`rounded-lg p-2 ${action.bg}`}>
+                  <action.icon className={`h-5 w-5 ${action.color}`} />
                 </div>
-                <span className="text-gray-300 group-hover:text-white font-medium flex-1 text-left">
-                  {action.label}
-                </span>
-                <ArrowUpRight className="w-4 h-4 text-gray-500 group-hover:text-red-400 transition-colors" />
+                <span className="flex-1 text-left font-medium text-gray-300 group-hover:text-white">{action.label}</span>
+                <ArrowUpRight className="h-4 w-4 text-gray-500 transition-colors group-hover:text-red-400" />
               </motion.button>
             ))}
           </div>
 
-          {/* Activity Summary */}
-          <div className="mt-8 pt-6 border-t border-white/10">
+          <div className="mt-8 border-t border-white/10 pt-6">
             <h3 className="mb-4 text-lg font-semibold text-white">This Week</h3>
             <div className="space-y-3">
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-gray-400">Tenders Scanned</span>
-                <span className="text-white font-semibold">{statsData.total}</span>
+                <span className="font-semibold text-white">{statsData.total}</span>
               </div>
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-gray-400">Matches Found</span>
-                <span className="text-emerald-400 font-semibold">{statsData.relevant}</span>
+                <span className="font-semibold text-emerald-400">{statsData.relevant}</span>
               </div>
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-gray-400">AI Analysis</span>
-                <span className="text-blue-400 font-semibold">{statsData.pending} pending</span>
+                <span className="font-semibold text-blue-400">{statsData.pending} pending</span>
               </div>
             </div>
           </div>
@@ -385,16 +377,59 @@ const DashboardView = () => {
         isOpen={Boolean(selectedTender)}
         onClose={() => setSelectedTender(null)}
         title={selectedTender ? selectedTender.title : 'Tender Details'}
-        description="Working detail modal. Replace with backend tender detail endpoint."
+        description="Live tender details with direct links and deadline context."
         size="md"
       >
         {selectedTender ? (
-          <div className="space-y-3 text-sm text-gray-300">
-            <p><span className="text-gray-400">Organization:</span> {selectedTender.organization}</p>
-            <p><span className="text-gray-400">Deadline:</span> {selectedTender.deadline}</p>
-            <p><span className="text-gray-400">Value:</span> {selectedTender.value}</p>
-            <p><span className="text-gray-400">Priority:</span> {selectedTender.priority}</p>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: [0.2, 0.9, 0.25, 1] }}
+            className="space-y-4 text-sm text-gray-300"
+          >
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-300">{selectedTender.priority}</span>
+                <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-300">{selectedTender.tender_id || selectedTender.id}</span>
+              </div>
+              <div className="space-y-2">
+                <p className="inline-flex items-center gap-2"><Building2 className="h-4 w-4 text-gray-400" /> {getTenderOrganization(selectedTender)}</p>
+                <p className="inline-flex items-center gap-2"><CalendarClock className="h-4 w-4 text-amber-400" /> Deadline: {formatDateTimeLabel(selectedTender.deadline)}</p>
+                <p><span className="text-gray-400">Estimated Value/Security:</span> {selectedTender.value}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Link
+                to={`/tenders/${selectedTender.tender_id || selectedTender.id}`}
+                onClick={() => setSelectedTender(null)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 font-medium text-gray-100 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
+              >
+                Full Details <ArrowUpRight className="h-4 w-4" />
+              </Link>
+              {selectedTenderLink ? (
+                <a
+                  href={selectedTenderLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 font-medium text-red-200 transition hover:bg-red-500/20"
+                >
+                  Open e-GP Link <ExternalLink className="h-4 w-4" />
+                </a>
+              ) : (
+                <div className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-gray-400">
+                  No source link available
+                </div>
+              )}
+            </div>
+
+            {selectedTender.description ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Summary</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-gray-200">{selectedTender.description}</p>
+              </div>
+            ) : null}
+          </motion.div>
         ) : null}
       </Modal>
 

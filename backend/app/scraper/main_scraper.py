@@ -427,7 +427,11 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                         if not saved_pdf_path:
                             saved_pdf_path = _save_pdf_if_needed(cfg, tender_id, absolute_pdf_url)
 
-                        source_url = absolute_detail_url if absolute_detail_url else cfg.advanced_url
+                        source_url = (
+                            absolute_detail_url
+                            if absolute_detail_url
+                            else f"https://www.eprocure.gov.bd/resources/common/ViewTender.jsp?id={tender_id}&h=t"
+                        )
 
                         item = {
                             "tender_id": tender_id,

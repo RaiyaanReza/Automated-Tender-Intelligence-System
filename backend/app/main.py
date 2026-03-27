@@ -82,6 +82,16 @@ def seed_demo_tenders_if_empty(db: Session):
     db.commit()
 
 
+def remove_demo_tenders(db: Session):
+    # Drop non-production seed rows so UI remains fully data-driven from scraper ingestion.
+    demo_rows = db.query(models.Tender).filter(models.Tender.tender_id.like("EGP-%")).all()
+    if not demo_rows:
+        return
+    for row in demo_rows:
+        db.delete(row)
+    db.commit()
+
+
 def seed_alerts_if_empty(db: Session):
     if db.query(models.Alert).count() > 0:
         return
@@ -187,7 +197,7 @@ def app_startup():
     )
     db = database.SessionLocal()
     try:
-        seed_demo_tenders_if_empty(db)
+        remove_demo_tenders(db)
         seed_alerts_if_empty(db)
         seed_settings_if_empty(db)
         seed_sources_if_empty(db)

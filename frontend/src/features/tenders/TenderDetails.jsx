@@ -2,25 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Building2, CalendarClock, ExternalLink, FileText, ShieldCheck } from 'lucide-react';
 import { tenderAPI } from '../../services/api';
-
-const EGP_BASE = 'https://www.eprocure.gov.bd/resources/common/';
-
-const normalizeLink = (value) => {
-  const link = String(value || '').trim();
-  if (!link) return '';
-  if (link.startsWith('http://') || link.startsWith('https://')) return link;
-  try {
-    return new URL(link, EGP_BASE).toString();
-  } catch {
-    return '';
-  }
-};
+import { formatDateTimeLabel, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
 
 const formatDate = (value) => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatDateTimeLabel(value);
 };
 
 const Row = ({ label, value }) => (
@@ -56,7 +41,7 @@ const TenderDetails = () => {
   const ai = useMemo(() => (tender?.ai_summary && typeof tender.ai_summary === 'object' ? tender.ai_summary : {}), [tender]);
   const requirements = Array.isArray(ai.key_requirements) ? ai.key_requirements : [];
   const recommendations = Array.isArray(ai.recommendations) ? ai.recommendations : [];
-  const detailLink = normalizeLink(ai.source_url || ai.detail_url);
+  const detailLink = resolveTenderSourceUrl(tender);
   const deadlineValue = tender.deadline || ai.closing_date || ai.deadline;
 
   if (loading) {
@@ -87,7 +72,7 @@ const TenderDetails = () => {
       <div className="rounded-2xl border border-white/10 bg-base-300 p-6 space-y-3">
         <h1 className="text-2xl font-bold text-white">{tender.title}</h1>
         <div className="flex flex-wrap gap-3 text-sm text-gray-400">
-          <span className="inline-flex items-center gap-1"><Building2 className="h-4 w-4" /> {tender.organization || 'Unknown organization'}</span>
+          <span className="inline-flex items-center gap-1"><Building2 className="h-4 w-4" /> {getTenderOrganization(tender)}</span>
           <span className="inline-flex items-center gap-1"><CalendarClock className="h-4 w-4" /> Deadline: {formatDate(deadlineValue)}</span>
           <span className="inline-flex items-center gap-1"><ShieldCheck className="h-4 w-4" /> Status: {tender.status || 'new'}</span>
         </div>
