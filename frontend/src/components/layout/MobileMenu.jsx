@@ -12,11 +12,11 @@ const MobileMenu = ({ isOpen, onClose, children }) => {
       
       {/* Mobile Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-full w-72 bg-base-300 border-r border-white/10 z-50 
+        className={`fixed top-0 left-0 h-full w-[88vw] max-w-sm border-r border-white/10 bg-[#0b0b10]/95 z-50 
         lg:hidden transform transition-transform duration-300 ease-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
-        <div className="flex items-center justify-between p-6 border-b border-white/10">
+        <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-6">
           <h2 className="text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
             TIAS Scout
           </h2>
@@ -27,7 +27,7 @@ const MobileMenu = ({ isOpen, onClose, children }) => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <nav className="p-4 space-y-2">{children}</nav>
+        <div className="h-[calc(100%-73px)] overflow-y-auto">{children}</div>
       </div>
     </>
   );

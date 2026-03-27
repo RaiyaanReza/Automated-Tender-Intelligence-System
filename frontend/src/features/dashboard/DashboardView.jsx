@@ -1,0 +1,425 @@
+import { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import {
+  ArrowUpRight,
+  Building2,
+  CheckCircle,
+  Clock,
+  DollarSign,
+  TrendingUp, 
+  FileText,
+  Target,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
+import Modal from '../../components/ui/Modal';
+
+const DashboardView = () => {
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [selectedTender, setSelectedTender] = useState(null);
+  const [selectedQuickAction, setSelectedQuickAction] = useState(null);
+
+  // Future backend integration: replace hardcoded arrays with API payloads.
+  const stats = [
+    {
+      icon: FileText,
+      label: 'Total Tenders',
+      value: '156',
+      change: '+12%',
+      trend: 'up',
+      color: 'from-red-500 to-red-700',
+      bg: 'bg-red-500/10',
+      borderColor: 'border-red-500/20',
+    },
+    {
+      icon: CheckCircle,
+      label: 'Relevant',
+      value: '43',
+      change: '+5%',
+      trend: 'up',
+      color: 'from-emerald-500 to-emerald-700',
+      bg: 'bg-emerald-500/10',
+      borderColor: 'border-emerald-500/20',
+    },
+    {
+      icon: Clock,
+      label: 'Pending Review',
+      value: '18',
+      change: '-3%',
+      trend: 'down',
+      color: 'from-amber-500 to-amber-700',
+      bg: 'bg-amber-500/10',
+      borderColor: 'border-amber-500/20',
+    },
+    {
+      icon: TrendingUp,
+      label: 'Success Rate',
+      value: '87%',
+      change: '+8%',
+      trend: 'up',
+      color: 'from-blue-500 to-blue-700',
+      bg: 'bg-blue-500/10',
+      borderColor: 'border-blue-500/20',
+    },
+  ];
+
+  const recentTenders = [
+    {
+      id: 1,
+      title: 'Network Infrastructure Upgrade',
+      organization: 'Ministry of Communications',
+      deadline: '5 days left',
+      value: '$2.5M',
+      priority: 'High',
+      status: 'new',
+    },
+    {
+      id: 2,
+      title: 'Cloud Services Procurement',
+      organization: 'National IT Authority',
+      deadline: '12 days left',
+      value: '$1.8M',
+      priority: 'Medium',
+      status: 'review',
+    },
+    {
+      id: 3,
+      title: 'Cybersecurity Solutions',
+      organization: 'Defense Department',
+      deadline: '3 days left',
+      value: '$3.2M',
+      priority: 'Urgent',
+      status: 'urgent',
+    },
+  ];
+
+  const quickActions = useMemo(
+    () => [
+      { id: 'browse', icon: FileText, label: 'Browse Tenders', color: 'text-red-400', bg: 'bg-red-500/10' },
+      { id: 'review', icon: CheckCircle, label: 'Review Pending', color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+      { id: 'analytics', icon: DollarSign, label: 'View Analytics', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+      { id: 'sources', icon: Building2, label: 'Manage Sources', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+    ],
+    [],
+  );
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1, delayChildren: 0.2 },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { y: 30, opacity: 0 },
+    visible: {
+      y: 0,
+      opacity: 1,
+      transition: { duration: 0.6, ease: [0.4, 0, 0.2, 1] },
+    },
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Header Section */}
+      <motion.div
+        initial={{ y: -30, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6 }}
+        className="flex flex-col gap-4 sm:gap-6 lg:flex-row lg:items-center lg:justify-between"
+      >
+        <div className="min-w-0">
+          <motion.h1
+            initial={{ x: -20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            className="mb-1 text-3xl font-bold text-white sm:mb-2 sm:text-4xl lg:text-5xl"
+          >
+            Dashboard
+          </motion.h1>
+          <motion.p
+            initial={{ x: -20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: 0.1 }}
+            className="text-sm text-gray-400 sm:text-base lg:text-lg"
+          >
+            Monitor • Analyze • Act
+          </motion.p>
+        </div>
+
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          type="button"
+          onClick={() => setIsSearchModalOpen(true)}
+          className="btn-primary flex items-center gap-2 self-start px-5 py-3 text-sm sm:px-7 sm:py-3.5 sm:text-base lg:self-auto"
+        >
+          <Target className="h-5 w-5" />
+          <span>New Tender Search</span>
+        </motion.button>
+      </motion.div>
+
+      {/* Stats Grid */}
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4"
+      >
+        {stats.map((stat) => (
+          <motion.div
+            key={stat.label}
+            variants={itemVariants}
+            whileHover={{ y: -8, scale: 1.02 }}
+            className="stat-card cursor-pointer group"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <motion.div
+                whileHover={{ scale: 1.1, rotate: 5 }}
+                className={`p-4 rounded-2xl ${stat.bg} border ${stat.borderColor}`}
+              >
+                <stat.icon className={`h-6 w-6 sm:h-7 sm:w-7 bg-gradient-to-r ${stat.color} text-white`} />
+              </motion.div>
+              <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
+                stat.trend === 'up'
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'bg-red-500/10 text-red-400'
+              }`}>
+                {stat.trend === 'up' ? '↑' : '↓'}
+                {stat.change}
+              </div>
+            </div>
+
+            <motion.h3
+              className="mb-1 text-3xl font-bold text-white sm:text-4xl"
+              whileHover={{ scale: 1.05 }}
+            >
+              {stat.value}
+            </motion.h3>
+            <p className="text-gray-400 text-sm">{stat.label}</p>
+            
+            <div className="mt-4 pt-4 border-t border-white/5">
+              <div className="flex items-center gap-2 text-sm text-gray-500 group-hover:text-red-400 transition-colors">
+                <span>View details</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </motion.div>
+
+      {/* Two Column Layout */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-8">
+        {/* Recent Tenders */}
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="glass-card p-4 sm:p-6 lg:col-span-2"
+        >
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="mb-1 text-xl font-bold text-white sm:text-2xl">Recent Tenders</h2>
+              <p className="text-gray-400 text-sm">Latest opportunities for you</p>
+            </div>
+            <Link to="/tenders" className="text-red-400 hover:text-red-300 text-sm font-medium flex items-center gap-1 transition-colors">
+              View All
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          <div className="space-y-4">
+            {recentTenders.map((tender, index) => (
+              <motion.div
+                key={tender.id}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: 0.5 + (index * 0.1) }}
+                whileHover={{ x: 8 }}
+                className="tender-card cursor-pointer group"
+                onClick={() => setSelectedTender(tender)}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
+                      <h4 className="text-base sm:text-lg text-white font-semibold group-hover:text-red-400 transition-colors">
+                        {tender.title}
+                      </h4>
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        tender.priority === 'Urgent'
+                          ? 'bg-red-500/20 text-red-400'
+                          : tender.priority === 'High'
+                          ? 'bg-orange-500/20 text-orange-400'
+                          : 'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {tender.priority}
+                      </span>
+                    </div>
+                    
+                    <div className="mb-3 flex items-center gap-4 text-sm text-gray-400">
+                      <div className="flex items-center gap-1">
+                        <Building2 className="w-4 h-4" />
+                        <span>{tender.organization}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-sm">
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <Clock className="w-4 h-4 text-amber-400" />
+                        <span>{tender.deadline}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                        <span>{tender.value}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <motion.div
+                    whileHover={{ scale: 1.1 }}
+                    className="hidden sm:flex h-10 w-10 rounded-xl gradient-red items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <ArrowUpRight className="w-5 h-5 text-white" />
+                  </motion.div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Quick Actions / Activity */}
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="glass-card p-4 sm:p-6"
+        >
+          <h2 className="mb-6 text-xl font-bold text-white sm:text-2xl">Quick Actions</h2>
+
+          <div className="space-y-3">
+            {quickActions.map((action, index) => (
+              <motion.button
+                key={action.label}
+                initial={{ x: 20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: 0.6 + (index * 0.1) }}
+                whileHover={{ x: 5, scale: 1.02 }}
+                type="button"
+                onClick={() => setSelectedQuickAction(action)}
+                className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5 hover:border-red-500/30 hover:bg-white/10 transition-all group"
+              >
+                <div className={`p-2 rounded-lg ${action.bg}`}>
+                  <action.icon className={`w-5 h-5 ${action.color}`} />
+                </div>
+                <span className="text-gray-300 group-hover:text-white font-medium flex-1 text-left">
+                  {action.label}
+                </span>
+                <ArrowUpRight className="w-4 h-4 text-gray-500 group-hover:text-red-400 transition-colors" />
+              </motion.button>
+            ))}
+          </div>
+
+          {/* Activity Summary */}
+          <div className="mt-8 pt-6 border-t border-white/10">
+            <h3 className="mb-4 text-lg font-semibold text-white">This Week</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">Tenders Scanned</span>
+                <span className="text-white font-semibold">1,247</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">Matches Found</span>
+                <span className="text-emerald-400 font-semibold">+43</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">AI Analysis</span>
+                <span className="text-blue-400 font-semibold">28 done</span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+
+      <Modal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        title="New Tender Search"
+        description="Working modal with fields ready to connect to backend search API."
+        size="md"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setIsSearchModalOpen(false)}
+              className="rounded-xl border border-white/15 px-4 py-2 text-sm font-medium text-gray-200 hover:border-white/30 hover:bg-white/5"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsSearchModalOpen(false);
+                window.alert('Search submitted (placeholder). Connect backend endpoint here.');
+              }}
+              className="rounded-xl bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-sm font-semibold text-white hover:from-red-500 hover:to-red-600"
+            >
+              Run Search
+            </button>
+          </div>
+        }
+      >
+        <form className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Query</span>
+            <input
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-red-500/50"
+              placeholder="e.g. cybersecurity, network infra, cloud"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Budget (Min)</span>
+            <input className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none" placeholder="500000" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Deadline Window</span>
+            <select className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none">
+              <option className="bg-[#111]">7 days</option>
+              <option className="bg-[#111]">14 days</option>
+              <option className="bg-[#111]">30 days</option>
+            </select>
+          </label>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedTender)}
+        onClose={() => setSelectedTender(null)}
+        title={selectedTender ? selectedTender.title : 'Tender Details'}
+        description="Working detail modal. Replace with backend tender detail endpoint."
+        size="md"
+      >
+        {selectedTender ? (
+          <div className="space-y-3 text-sm text-gray-300">
+            <p><span className="text-gray-400">Organization:</span> {selectedTender.organization}</p>
+            <p><span className="text-gray-400">Deadline:</span> {selectedTender.deadline}</p>
+            <p><span className="text-gray-400">Value:</span> {selectedTender.value}</p>
+            <p><span className="text-gray-400">Priority:</span> {selectedTender.priority}</p>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedQuickAction)}
+        onClose={() => setSelectedQuickAction(null)}
+        title={selectedQuickAction ? selectedQuickAction.label : 'Quick Action'}
+        description="Action stub is fully wired and ready for backend integration."
+        size="sm"
+      >
+        <p className="text-sm text-gray-300">
+          This action flow is working on the frontend. Map this to your API route or service method when backend endpoints are ready.
+        </p>
+      </Modal>
+    </div>
+  );
+};
+
+export default DashboardView;
