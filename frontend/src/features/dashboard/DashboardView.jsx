@@ -13,16 +13,24 @@ import {
   Target,
   TrendingUp,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../../components/ui/Modal';
 import useTenders from '../../hooks/useTenders';
 import { formatDateTimeLabel, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
+import { configAPI } from '../../services/api';
 
 const DashboardView = () => {
+  const navigate = useNavigate();
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [selectedTender, setSelectedTender] = useState(null);
-  const [selectedQuickAction, setSelectedQuickAction] = useState(null);
-  const { tenders, loading, error, stats: statsData } = useTenders();
+  const [searchForm, setSearchForm] = useState({
+    query: '',
+    budgetMin: '',
+    deadlineWindow: '30',
+  });
+  const [isSubmittingSearch, setIsSubmittingSearch] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
+  const { tenders, loading, error, stats: statsData, reload: reloadTenders } = useTenders();
 
   const stats = [
     {
@@ -97,6 +105,45 @@ const DashboardView = () => {
   const recentTenders = tenders.slice(0, 5);
   const selectedTenderLink = selectedTender ? resolveTenderSourceUrl(selectedTender) : '';
 
+  const quickActionRoutes = {
+    browse: '/tenders',
+    review: '/tenders',
+    analytics: '/analysis',
+    sources: '/sources',
+  };
+
+  const handleQuickAction = (actionId) => {
+    const route = quickActionRoutes[actionId];
+    if (!route) return;
+    navigate(route);
+  };
+
+  const handleSearchSubmit = async () => {
+    const query = String(searchForm.query || '').trim();
+    if (!query) {
+      setActionMessage('Please enter a keyword before running search.');
+      return;
+    }
+
+    setIsSubmittingSearch(true);
+    setActionMessage('');
+    try {
+      await configAPI.runScraperNow({
+        keyword: query,
+        max_pages: 1,
+        max_items_per_cycle: 10,
+        save_pdf: true,
+      });
+      await reloadTenders();
+      setActionMessage('Search completed and dashboard refreshed.');
+      setIsSearchModalOpen(false);
+    } catch (runError) {
+      setActionMessage(runError?.response?.data?.detail || 'Failed to run scraper search.');
+    } finally {
+      setIsSubmittingSearch(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <motion.div
@@ -134,6 +181,12 @@ const DashboardView = () => {
           <span>New Tender Search</span>
         </motion.button>
       </motion.div>
+
+      {actionMessage ? (
+        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">
+          {actionMessage}
+        </div>
+      ) : null}
 
       <motion.div
         variants={containerVariants}
@@ -290,7 +343,7 @@ const DashboardView = () => {
                 transition={{ delay: 0.6 + index * 0.1 }}
                 whileHover={{ x: 5, scale: 1.02 }}
                 type="button"
-                onClick={() => setSelectedQuickAction(action)}
+                onClick={() => handleQuickAction(action.id)}
                 className="group flex w-full items-center gap-3 rounded-xl border border-white/5 bg-white/5 p-4 transition-all hover:border-red-500/30 hover:bg-white/10"
               >
                 <div className={`rounded-lg p-2 ${action.bg}`}>
@@ -339,13 +392,11 @@ const DashboardView = () => {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setIsSearchModalOpen(false);
-                window.alert('Search submitted (placeholder). Connect backend endpoint here.');
-              }}
-              className="rounded-xl bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-sm font-semibold text-white hover:from-red-500 hover:to-red-600"
+              onClick={handleSearchSubmit}
+              disabled={isSubmittingSearch}
+              className="rounded-xl bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-sm font-semibold text-white hover:from-red-500 hover:to-red-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Run Search
+              {isSubmittingSearch ? 'Running...' : 'Run Search'}
             </button>
           </div>
         }
@@ -356,15 +407,26 @@ const DashboardView = () => {
             <input
               className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-red-500/50"
               placeholder="e.g. cybersecurity, network infra, cloud"
+              value={searchForm.query}
+              onChange={(event) => setSearchForm((prev) => ({ ...prev, query: event.target.value }))}
             />
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Budget (Min)</span>
-            <input className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none" placeholder="500000" />
+            <input
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+              placeholder="500000"
+              value={searchForm.budgetMin}
+              onChange={(event) => setSearchForm((prev) => ({ ...prev, budgetMin: event.target.value }))}
+            />
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Deadline Window</span>
-            <select className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none">
+            <select
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+              value={searchForm.deadlineWindow}
+              onChange={(event) => setSearchForm((prev) => ({ ...prev, deadlineWindow: event.target.value }))}
+            >
               <option className="bg-[#111]">7 days</option>
               <option className="bg-[#111]">14 days</option>
               <option className="bg-[#111]">30 days</option>
@@ -433,17 +495,6 @@ const DashboardView = () => {
         ) : null}
       </Modal>
 
-      <Modal
-        isOpen={Boolean(selectedQuickAction)}
-        onClose={() => setSelectedQuickAction(null)}
-        title={selectedQuickAction ? selectedQuickAction.label : 'Quick Action'}
-        description="Action stub is fully wired and ready for backend integration."
-        size="sm"
-      >
-        <p className="text-sm text-gray-300">
-          This action flow is working on the frontend. Map this to your API route or service method when backend endpoints are ready.
-        </p>
-      </Modal>
     </div>
   );
 };
