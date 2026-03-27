@@ -17,6 +17,24 @@ from bs4 import BeautifulSoup
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()
 
+
+def _sanitize_detail_text(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    noise_patterns = [
+        r"save\s*as\s*pdf",
+        r"download\s*(document|file)",
+        r"view\s*tender",
+        r"back\s*to\s*list",
+        r"print",
+        r"home\s*>\s*tender",
+    ]
+    for pattern in noise_patterns:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" |")
+
 def download_and_extract_pdf_text(pdf_url: str, timeout: int = 30) -> str:
     """Download a PDF from an absolute URL and extract its text into a string."""
     if not pdf_url:
@@ -262,7 +280,7 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
         if not label or not value:
             continue
         if label in _DETAIL_LABEL_MAP:
-            details[_DETAIL_LABEL_MAP[label]] = value
+            details[_DETAIL_LABEL_MAP[label]] = _sanitize_detail_text(value)
 
     # Fallback parser for sections that render as plain text blocks.
     full_text = _clean_text(soup.get_text("\n", strip=True))
@@ -273,7 +291,7 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
             flags=re.IGNORECASE,
         )
         if match:
-            details["eligibility"] = _clean_text(match.group(1))
+            details["eligibility"] = _sanitize_detail_text(match.group(1))
 
     if not details["tender_security_amount"]:
         match = re.search(
@@ -282,19 +300,19 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
             flags=re.IGNORECASE,
         )
         if match:
-            details["tender_security_amount"] = _clean_text(match.group(1))
+            details["tender_security_amount"] = _sanitize_detail_text(match.group(1))
 
     if not details["location"]:
         match = re.search(r"Location\s*:?\s*(.+?)(?:$)", full_text, flags=re.IGNORECASE)
         if match:
-            details["location"] = _clean_text(match.group(1))
+            details["location"] = _sanitize_detail_text(match.group(1))
 
     info_parts = [
         details["eligibility"],
         details["tender_security_amount"],
         details["location"],
     ]
-    details["description"] = " | ".join([part for part in info_parts if part])
+    details["description"] = _sanitize_detail_text(" | ".join([part for part in info_parts if part]))
 
     pdf_link = soup.find("a", href=True, text=re.compile("save as pdf", flags=re.IGNORECASE))
     if not pdf_link:

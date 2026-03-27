@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Building2, CalendarClock, ExternalLink, FileText, ShieldCheck } from 'lucide-react';
 import { tenderAPI } from '../../services/api';
-import { formatDateTimeLabel, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
+import {
+  cleanSummaryText,
+  extractSummaryBullets,
+  formatDateTimeLabel,
+  getTenderOrganization,
+  resolveTenderSourceUrl,
+} from '../../utils/helpers';
 
 const formatDate = (value) => {
   return formatDateTimeLabel(value);
@@ -30,7 +36,19 @@ const TenderDetails = () => {
         const response = await tenderAPI.getById(id);
         setTender(response.data || null);
       } catch (err) {
-        setError(err?.response?.data?.detail || 'Failed to load tender details.');
+        try {
+          // Fallback lookup for edge cases where route id encoding differs.
+          const listResponse = await tenderAPI.getAll();
+          const items = Array.isArray(listResponse?.data) ? listResponse.data : [];
+          const found = items.find((item) => String(item?.tender_id) === String(id) || String(item?.id) === String(id));
+          if (found) {
+            setTender(found);
+          } else {
+            setError(err?.response?.data?.detail || 'Failed to load tender details.');
+          }
+        } catch {
+          setError(err?.response?.data?.detail || 'Failed to load tender details.');
+        }
       } finally {
         setLoading(false);
       }
@@ -111,13 +129,20 @@ const TenderDetails = () => {
 
       <div className="rounded-2xl border border-white/10 bg-base-300 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-white">AI Summary</h2>
-        <p className="text-sm text-gray-200 whitespace-pre-wrap">{tender.description || 'No description available.'}</p>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Overview</p>
+          <p className="text-sm text-gray-200 whitespace-pre-wrap">
+            {cleanSummaryText(ai.notes || tender.description || 'No summary available.')}
+          </p>
+        </div>
 
         <div>
           <h3 className="text-sm font-semibold text-gray-100 mb-2">Key Requirements</h3>
-          {requirements.length === 0 ? <p className="text-sm text-gray-400">No requirements extracted.</p> : (
+          {(requirements.length === 0 ? extractSummaryBullets(tender.description || '', 6) : requirements).length === 0 ? <p className="text-sm text-gray-400">No requirements extracted.</p> : (
             <ul className="list-disc list-inside space-y-1 text-sm text-gray-200">
-              {requirements.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+              {(requirements.length === 0 ? extractSummaryBullets(tender.description || '', 6) : requirements)
+                .map((item, index) => <li key={`${item}-${index}`}>{cleanSummaryText(item)}</li>)}
             </ul>
           )}
         </div>

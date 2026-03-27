@@ -59,3 +59,40 @@ export const formatDateTimeLabel = (value) => {
 	return date.toLocaleString();
 };
 
+const NOISE_PATTERNS = [
+	/save\s*as\s*pdf/gi,
+	/click\s*here/gi,
+	/print/gi,
+	/back\s*to\s*list/gi,
+	/view\s*tender/gi,
+	/download\s*document/gi,
+	/home\s*>\s*tender/gi,
+];
+
+export const cleanSummaryText = (value) => {
+	let text = String(value || '');
+	for (const pattern of NOISE_PATTERNS) {
+		text = text.replace(pattern, ' ');
+	}
+	return text.replace(/\s+/g, ' ').replace(/\|\s*\|/g, '|').trim();
+};
+
+export const extractSummaryBullets = (value, maxItems = 5) => {
+	const cleaned = cleanSummaryText(value);
+	if (!cleaned) return [];
+
+	const normalized = cleaned
+		.replace(/\(\d+\)/g, '|')
+		.replace(/[;]+/g, '|')
+		.replace(/\s\|\s/g, '|')
+		.replace(/\./g, '.|');
+
+	const parts = normalized
+		.split('|')
+		.map((part) => part.trim())
+		.filter((part) => part.length > 25)
+		.filter((part, index, arr) => arr.indexOf(part) === index);
+
+	return parts.slice(0, maxItems);
+};
+

@@ -16,7 +16,13 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../../components/ui/Modal';
 import useTenders from '../../hooks/useTenders';
-import { formatDateTimeLabel, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
+import {
+  cleanSummaryText,
+  extractSummaryBullets,
+  formatDateTimeLabel,
+  getTenderOrganization,
+  resolveTenderSourceUrl,
+} from '../../utils/helpers';
 import { configAPI } from '../../services/api';
 
 const DashboardView = () => {
@@ -463,7 +469,7 @@ const DashboardView = () => {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Link
-                to={`/tenders/${selectedTender.tender_id || selectedTender.id}`}
+                to={`/tenders/${encodeURIComponent(selectedTender.tender_id || selectedTender.id)}`}
                 onClick={() => setSelectedTender(null)}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 font-medium text-gray-100 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
               >
@@ -485,12 +491,23 @@ const DashboardView = () => {
               )}
             </div>
 
-            {selectedTender.description ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Summary</p>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-gray-200">{selectedTender.description}</p>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Summary</p>
+              <div className="mt-2 space-y-2 text-sm text-gray-200">
+                {selectedTender?.ai_summary?.notes ? (
+                  <p>{cleanSummaryText(selectedTender.ai_summary.notes)}</p>
+                ) : null}
+                {(Array.isArray(selectedTender?.ai_summary?.key_requirements)
+                  ? selectedTender.ai_summary.key_requirements
+                  : extractSummaryBullets(selectedTender.description || '', 4)
+                ).slice(0, 4).map((item, index) => (
+                  <div key={`${item}-${index}`} className="flex items-start gap-2">
+                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                    <span>{cleanSummaryText(item)}</span>
+                  </div>
+                ))}
               </div>
-            ) : null}
+            </div>
           </motion.div>
         ) : null}
       </Modal>
