@@ -1,23 +1,22 @@
-"""
-egp_scout.py
+"""Compatibility wrapper that delegates to the scraper runner."""
 
-Playwright-based scraping logic placeholder for EGP/portal scout.
-
-Expected responsibilities:
-- Launch browsers and capture screenshots for evidence.
-- Navigate paginated listings and collect tender metadata.
-- Save raw HTML/PDFs for parser consumption.
-
-Do not implement logic here yet — backend developer to fill in.
-"""
+from __future__ import annotations
 
 from typing import Any, Dict
 
+from .main_scraper import ScraperConfig, run_scraper
 
-def run_scout(config: Dict[str, Any]) -> None:
-    """Placeholder: run the scout for a configured source.
 
-    Args:
-        config: dict with source-specific settings (url, timeouts, credentials)
-    """
-    raise NotImplementedError("egp_scout.run_scout must be implemented by backend team")
+def run_scout(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Run scraper using a dictionary config for backward compatibility."""
+    defaults = ScraperConfig()
+    cfg = ScraperConfig(
+        start_url=config.get("start_url", defaults.start_url),
+        api_base_url=config.get("api_base_url", defaults.api_base_url),
+        max_pages=int(config.get("max_pages", defaults.max_pages)),
+        timeout_ms=int(config.get("timeout_ms", defaults.timeout_ms)),
+        debug=bool(config.get("debug", False)),
+        headless=config.get("headless"),
+        keyword=str(config.get("keyword", "")),
+    )
+    return run_scraper(cfg)
