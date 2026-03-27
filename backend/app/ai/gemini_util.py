@@ -52,7 +52,25 @@ def _priority_from_risk(risk_level: str) -> str:
     return mapping.get((risk_level or "").strip().lower(), "Low")
 
 
-def _gemini_generate(prompt: str, model: str) -> str:
+def _generate_text(prompt: str, model: str) -> str:
+    # 1. Try Hugging Face
+    hf_api_key = os.getenv("HF_API_KEY", "").strip()
+    if hf_api_key:
+        try:
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(token=hf_api_key)
+            hf_model = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+            result = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=hf_model,
+                max_tokens=700,
+                temperature=0.2,
+            )
+            return result.choices[0].message.content
+        except Exception as e:
+            print(f"HF Inference skipped/failed: {e}")
+
+    # 2. Try Gemini
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         return ""
@@ -94,7 +112,7 @@ def summarize_text(text: str, options: Dict[str, Any] = None) -> str:
         " procurement context.\n\n"
         f"Content:\n{source_text[:12000]}"
     )
-    generated = _gemini_generate(prompt, model=model)
+    generated = _generate_text(prompt, model=model)
     if generated:
         return generated
 
@@ -117,20 +135,26 @@ def generate_tender_ai_summary(title: str, eligibility: str, location: str = "")
         f"Eligibility: {eligibility}\n"
         f"Location: {location}\n"
     )
-    generated = _gemini_generate(prompt, model=model)
+    generated = _generate_text(prompt, model=model)
     parsed = _extract_json_object(generated)
     if parsed:
+        title_lower = title.lower()
+        is_weighted_title = any(token in title_lower for token in ["bandwidth", "dedicated", "internet service"])
+        boosted_risk = "High" if is_weighted_title else str(parsed.get("risk_level", "Medium"))
         return {
-            "risk_level": str(parsed.get("risk_level", "Medium")),
+            "risk_level": boosted_risk,
             "fit": str(parsed.get("fit", "Medium")),
             "notes": str(parsed.get("notes", "AI analysis completed")),
             "key_requirements": parsed.get("key_requirements", []) or [],
             "recommendations": parsed.get("recommendations", []) or [],
-            "priority": _priority_from_risk(str(parsed.get("risk_level", "Medium"))),
+            "priority": _priority_from_risk(boosted_risk),
         }
 
     requirements = _heuristic_requirements(eligibility)
     risk_level = _heuristic_risk_level(title, eligibility)
+    title_lower = title.lower()
+    if any(token in title_lower for token in ["bandwidth", "dedicated", "internet service"]):
+        risk_level = "High"
     return {
         "risk_level": risk_level,
         "fit": "Medium" if risk_level == "Medium" else ("High" if risk_level == "Low" else "Low"),

@@ -2,14 +2,76 @@
 
 from __future__ import annotations
 
+import io
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+import httpx
+import PyPDF2
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
 
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()
+
+def download_and_extract_pdf_text(pdf_url: str, timeout: int = 30) -> str:
+    """Download a PDF from an absolute URL and extract its text into a string."""
+    if not pdf_url:
+        return ""
+    try:
+        # Avoid verifying strict SSL if e-GP portal has issues
+        with httpx.Client(timeout=timeout, verify=False) as client:
+            resp = client.get(pdf_url)
+            resp.raise_for_status()
+            reader = PyPDF2.PdfReader(io.BytesIO(resp.content))
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as e:
+        print(f"Failed to fetch or parse PDF from {pdf_url}: {e}")
+        return ""
+
+
+def extract_pdf_text_from_bytes(pdf_data: bytes) -> str:
+    """Extract text from in-memory PDF bytes."""
+    if not pdf_data:
+        return ""
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_data))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as e:
+        print(f"Failed to parse PDF bytes: {e}")
+        return ""
+
+
+def download_pdf_bytes(pdf_url: str, timeout: int = 30) -> Tuple[bytes, str]:
+    """Download PDF as bytes and return optional filename from headers/url."""
+    if not pdf_url:
+        return b"", ""
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(pdf_url)
+            resp.raise_for_status()
+            content_type = (resp.headers.get("content-type") or "").lower()
+            data = resp.content or b""
+            is_pdf = ("application/pdf" in content_type) or data.startswith(b"%PDF")
+            if not is_pdf:
+                return b"", ""
+
+            filename = ""
+            content_disposition = resp.headers.get("content-disposition", "")
+            if "filename=" in content_disposition.lower():
+                filename = content_disposition.split("filename=", 1)[-1].strip().strip('"')
+            if not filename:
+                path_name = urlparse(pdf_url).path.rsplit("/", 1)[-1]
+                filename = path_name or "tender.pdf"
+            if not filename.lower().endswith(".pdf"):
+                filename = f"{filename}.pdf"
+            return data, filename
+    except Exception as e:
+        print(f"Failed to download PDF from {pdf_url}: {e}")
+        return b"", ""
 
 
 def _extract_tender_id(text: str) -> str:
@@ -37,6 +99,73 @@ def _extract_detail_url(link_tag) -> str:
     return ""
 
 
+def _extract_detail_url_from_onclick(tr, onclick_text: str) -> str:
+    """Resolve detail URL from onclick='document.getElementById("viewtenderform_X").submit();'"""
+    if not onclick_text:
+        return ""
+
+    form_match = re.search(r"getElementById\('([^']+)'\)", onclick_text)
+    if not form_match:
+        return ""
+
+    form_id = form_match.group(1)
+    form = tr.find("form", attrs={"id": form_id})
+    if not form:
+        return ""
+
+    action = _clean_text(str(form.get("action", "")))
+    if not action:
+        return ""
+
+    data = {}
+    for inp in form.find_all("input"):
+        name = _clean_text(str(inp.get("name", "")))
+        value = _clean_text(str(inp.get("value", "")))
+        if name:
+            data[name] = value
+
+    tender_id = data.get("id", "")
+    h_val = data.get("h", "t")
+    if tender_id:
+        separator = "&" if "?" in action else "?"
+        return f"{action}{separator}id={tender_id}&h={h_val or 't'}"
+    return action
+
+
+def _fallback_detail_url_from_row(tr) -> str:
+    """Build ViewTender URL from hidden input fields when links are javascript placeholders."""
+    tender_id_input = tr.find("input", attrs={"name": "id"})
+    h_input = tr.find("input", attrs={"name": "h"})
+    tender_id = _clean_text(str(tender_id_input.get("value", ""))) if tender_id_input else ""
+    h_val = _clean_text(str(h_input.get("value", ""))) if h_input else "t"
+    if tender_id:
+        return f"ViewTender.jsp?id={tender_id}&h={h_val or 't'}"
+    return ""
+
+
+def _parse_datetime(value: str) -> Optional[str]:
+    """Parse e-GP style datetime text and return ISO format."""
+    text = _clean_text(value)
+    if not text:
+        return None
+
+    patterns = [
+        "%d-%b-%Y %H:%M",
+        "%d-%b-%Y %H:%M:%S",
+        "%d-%B-%Y %H:%M",
+    ]
+    for pattern in patterns:
+        try:
+            return datetime.strptime(text, pattern).isoformat()
+        except Exception:
+            continue
+
+    try:
+        return parsedate_to_datetime(text).isoformat()
+    except Exception:
+        return None
+
+
 def extract_tender_list(html: str) -> List[Dict[str, str]]:
     """Extract list page rows into lightweight tender dictionaries.
 
@@ -48,21 +177,41 @@ def extract_tender_list(html: str) -> List[Dict[str, str]]:
 
     for tr in soup.select(".table-responsive tr, table tr"):
         cells = tr.find_all("td")
-        if len(cells) < 2:
+        # e-GP tender result rows are table-like with multiple columns.
+        if len(cells) < 6:
             continue
 
         row_text = _clean_text(tr.get_text(" ", strip=True))
-        link = tr.find("a", href=True)
-        title = _clean_text(link.get_text(" ", strip=True) if link else cells[1].get_text(" ", strip=True))
-        tender_id = _extract_tender_id(_clean_text(cells[0].get_text(" ", strip=True)))
+        link = cells[2].find("a", href=True) or tr.find("a", href=True)
+        title = _clean_text(link.get_text(" ", strip=True) if link else cells[2].get_text(" ", strip=True))
+
+        # Typical table has tender id in column 2 (index 1).
+        tender_id = _extract_tender_id(_clean_text(cells[1].get_text(" ", strip=True)))
         if not tender_id:
             tender_id = _extract_tender_id(row_text)
 
+        # Skip non-tender rows such as navigation blocks.
+        if not tender_id:
+            continue
+
         organization = ""
-        if len(cells) >= 3:
-            organization = _clean_text(cells[2].get_text(" ", strip=True))
+        if len(cells) >= 4:
+            organization = _clean_text(cells[3].get_text(" ", strip=True))
+
+        publishing_date_iso = None
+        closing_date_iso = None
+        date_text = _clean_text(cells[5].get_text(" ", strip=True))
+        # e-GP column usually has publish date first and closing date second.
+        candidates = [x.strip() for x in re.split(r",|\n", date_text) if x.strip()]
+        if candidates:
+            publishing_date_iso = _parse_datetime(candidates[0])
+            closing_date_iso = _parse_datetime(candidates[-1])
 
         detail_url = _extract_detail_url(link)
+        if not detail_url and link:
+            detail_url = _extract_detail_url_from_onclick(tr, _clean_text(str(link.get("onclick", ""))))
+        if not detail_url:
+            detail_url = _fallback_detail_url_from_row(tr)
         if not title:
             continue
 
@@ -77,6 +226,8 @@ def extract_tender_list(html: str) -> List[Dict[str, str]]:
                 "title": title,
                 "organization": organization,
                 "detail_url": detail_url,
+                "publishing_date": publishing_date_iso or "",
+                "closing_date": closing_date_iso or "",
             }
         )
 
@@ -145,11 +296,23 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
     ]
     details["description"] = " | ".join([part for part in info_parts if part])
 
-    pdf_link = soup.find("a", href=True, string=re.compile("save as pdf", flags=re.IGNORECASE))
+    pdf_link = soup.find("a", href=True, text=re.compile("save as pdf", flags=re.IGNORECASE))
     if not pdf_link:
         pdf_link = soup.find("a", href=True, attrs={"title": re.compile("pdf", flags=re.IGNORECASE)})
+    if not pdf_link:
+        pdf_link = soup.find("a", href=True, attrs={"href": re.compile(r"\.pdf($|\?)", flags=re.IGNORECASE)})
+    if not pdf_link:
+        pdf_link = soup.find("a", onclick=re.compile(r"pdf|save", flags=re.IGNORECASE))
     if pdf_link:
-        details["save_as_pdf_url"] = _clean_text(pdf_link["href"])
+        href = str(pdf_link.get("href", ""))
+        if not href and pdf_link.get("onclick"):
+            onclick_text = _clean_text(str(pdf_link.get("onclick", "")))
+            match = re.search(r"([^'\"\s)]+\.pdf(?:\?[^'\"\s)]*)?)", onclick_text, flags=re.IGNORECASE)
+            if match:
+                href = match.group(1)
+        cleaned = _clean_text(href)
+        if re.search(r"\.pdf($|\?)", cleaned, flags=re.IGNORECASE):
+            details["save_as_pdf_url"] = cleaned
 
     return details
 

@@ -4,16 +4,13 @@ import { motion } from 'framer-motion';
 import { Bell, UserCircle2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Modal from '../ui/Modal';
+import useApiResource from '../../hooks/useApiResource';
+import { alertAPI } from '../../services/api';
 
 const Layout = ({ children }) => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-
-  const notifications = [
-    { id: 'n-1', title: 'New high-priority tender detected', when: '2m ago', severity: 'high' },
-    { id: 'n-2', title: 'Daily scan completed for 14 sources', when: '25m ago', severity: 'info' },
-    { id: 'n-3', title: 'AI analysis ready for 6 tenders', when: '1h ago', severity: 'info' },
-  ];
+  const { data: notifications = [] } = useApiResource(alertAPI.getAll);
 
   return (
     <>
@@ -146,8 +143,8 @@ const Layout = ({ children }) => {
         <div className="space-y-3">
           {notifications.map((notification) => (
             <div key={notification.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-sm text-white">{notification.title}</p>
-              <p className="mt-1 text-xs text-gray-400">{notification.when}</p>
+              <p className="text-sm text-white">{notification.message || 'Notification'}</p>
+              <p className="mt-1 text-xs text-gray-400">{notification.created_at || 'Unknown time'}</p>
             </div>
           ))}
         </div>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tenderAPI } from '../services/api';
 
+const DAYS_WINDOW = 30;
+
 const formatDateLabel = (value) => {
 	if (!value) return 'No deadline';
 
@@ -23,6 +25,21 @@ const normalizeTender = (tender) => ({
 	status: tender.status || 'new',
 });
 
+const isWithinRecentWindow = (deadline, days = DAYS_WINDOW) => {
+	if (!deadline) return false;
+	const date = new Date(deadline);
+	if (Number.isNaN(date.getTime())) return false;
+
+	const now = new Date();
+	const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+	return diffDays >= -days && diffDays <= days;
+};
+
+const hasKeywordTrace = (tender) => {
+	const ai = tender?.ai_summary;
+	return Boolean(ai && typeof ai === 'object' && ai.keyword);
+};
+
 export default function useTenders() {
 	const [tenders, setTenders] = useState([]);
 	const [loading, setLoading] = useState(true);
@@ -43,14 +60,24 @@ export default function useTenders() {
 				tenderAPI.getDashboardStats(),
 			]);
 			const payload = Array.isArray(response.data) ? response.data : [];
-			setTenders(payload.map(normalizeTender));
+			const recent = payload.filter((item) => isWithinRecentWindow(item?.deadline));
+			const keywordRecent = recent.filter(hasKeywordTrace);
+			const effective = (keywordRecent.length > 0 ? keywordRecent : recent)
+				.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+
+			setTenders(effective.map(normalizeTender));
+
+			const relevant = effective.filter((item) => ['High', 'Urgent'].includes(item.priority)).length;
+			const pending = effective.filter((item) => ['new', 'review', 'PENDING_ANALYSIS'].includes(item.status)).length;
+			const total = effective.length;
+			const successRate = total > 0 ? `${Math.round((relevant / total) * 100)}%` : '0%';
 
 			const serverStats = statsResponse?.data || {};
 			setStats({
-				total: Number.isFinite(serverStats.total) ? serverStats.total : payload.length,
-				relevant: Number.isFinite(serverStats.relevant) ? serverStats.relevant : 0,
-				pending: Number.isFinite(serverStats.pending) ? serverStats.pending : 0,
-				successRate: typeof serverStats.success_rate === 'string' ? serverStats.success_rate : '0%',
+				total,
+				relevant,
+				pending,
+				successRate: typeof serverStats.success_rate === 'string' && total === 0 ? serverStats.success_rate : successRate,
 			});
 		} catch (err) {
 			setError(err?.response?.data?.detail || 'Failed to load tenders.');
@@ -61,6 +88,13 @@ export default function useTenders() {
 
 	useEffect(() => {
 		loadTenders();
+	}, [loadTenders]);
+
+	useEffect(() => {
+		const interval = setInterval(() => {
+			loadTenders();
+		}, 30 * 60 * 1000);
+		return () => clearInterval(interval);
 	}, [loadTenders]);
 
 	return {

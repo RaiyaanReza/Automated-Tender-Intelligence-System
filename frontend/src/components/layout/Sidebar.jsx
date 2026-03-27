@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -16,18 +16,63 @@ import {
 import SidebarItem from './SidebarItem';
 import MobileMenu from './MobileMenu';
 import Modal from '../ui/Modal';
+import { alertAPI, documentAPI, sourceAPI, tenderAPI } from '../../services/api';
 
 const Sidebar = () => {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [counts, setCounts] = useState({
+    tenders: 0,
+    alerts: 0,
+    documents: 0,
+    sources: 0,
+  });
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCounts = async () => {
+      try {
+        const [tendersRes, alertsRes, docsRes, sourcesRes] = await Promise.all([
+          tenderAPI.getAll(),
+          alertAPI.getAll(),
+          documentAPI.getAll(),
+          sourceAPI.getAll(),
+        ]);
+
+        if (!isActive) return;
+        const tenders = Array.isArray(tendersRes?.data) ? tendersRes.data : [];
+        const alerts = Array.isArray(alertsRes?.data) ? alertsRes.data : [];
+        const docs = Array.isArray(docsRes?.data) ? docsRes.data : [];
+        const sources = Array.isArray(sourcesRes?.data) ? sourcesRes.data : [];
+        const unread = alerts.filter((item) => item?.read === false).length;
+
+        setCounts({
+          tenders: tenders.length,
+          alerts: unread,
+          documents: docs.length,
+          sources: sources.length,
+        });
+      } catch {
+        // Keep existing counts if API is unavailable.
+      }
+    };
+
+    loadCounts();
+    const timer = setInterval(loadCounts, 60 * 1000);
+    return () => {
+      isActive = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   const navigationItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: FileText, label: 'All Tenders', path: '/tenders', badge: '12' },
+    { icon: FileText, label: 'All Tenders', path: '/tenders', badge: counts.tenders > 0 ? String(counts.tenders) : null },
     { icon: Sparkles, label: 'AI Analysis', path: '/analysis' },
-    { icon: FolderOpen, label: 'Documents', path: '/documents' },
-    { icon: Database, label: 'Data Sources', path: '/sources' },
-    { icon: Bell, label: 'Alerts', path: '/alerts', badge: '3' },
+    { icon: FolderOpen, label: 'Documents', path: '/documents', badge: counts.documents > 0 ? String(counts.documents) : null },
+    { icon: Database, label: 'Data Sources', path: '/sources', badge: counts.sources > 0 ? String(counts.sources) : null },
+    { icon: Bell, label: 'Alerts', path: '/alerts', badge: counts.alerts > 0 ? String(counts.alerts) : null },
     { icon: Settings, label: 'Settings', path: '/settings' },
   ];
 

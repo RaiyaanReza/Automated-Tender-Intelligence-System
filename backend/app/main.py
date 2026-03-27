@@ -1,11 +1,16 @@
 from typing import Optional
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from . import models, database
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from .scraper.main_scraper import ScraperConfig, run_scraper
+from .scraper.notifier import send_telegram_alert
 
 # Create tables in Postgres automatically
 models.Base.metadata.create_all(bind=database.engine)
@@ -119,18 +124,30 @@ def seed_sources_if_empty(db: Session):
 
 
 def sync_documents_from_tenders(db: Session):
+    # Rebuild documents table from real saved PDF paths only.
+    db.query(models.Document).delete()
+    db.commit()
+
     tenders = db.query(models.Tender).all()
-    existing_refs = {row[0] for row in db.query(models.Document.tender_ref).all()}
     rows = []
-    for index, tender in enumerate(tenders, start=1):
-        if not tender.tender_id or tender.tender_id in existing_refs:
+    for tender in tenders:
+        if not tender.tender_id:
             continue
+        ai = tender.ai_summary if isinstance(tender.ai_summary, dict) else {}
+        pdf_path = str(ai.get("pdf_saved_path", "")).strip()
+        if not pdf_path:
+            continue
+        path_obj = Path(pdf_path)
+        if not path_obj.exists() or path_obj.suffix.lower() != ".pdf":
+            continue
+
+        size_kb = max(1, int(path_obj.stat().st_size / 1024))
         rows.append(
             models.Document(
                 tender_ref=tender.tender_id,
-                title=f"{tender.title} - RFP.pdf",
-                size_kb=240 + (index * 17),
-                status="indexed",
+                title=path_obj.name,
+                size_kb=size_kb,
+                status="downloadable",
             )
         )
     if rows:
@@ -205,6 +222,25 @@ class TenderIn(BaseModel):
 class TenderIngestPayload(BaseModel):
     items: list[TenderIn]
 
+
+class ScraperRunPayload(BaseModel):
+    keyword: Optional[str] = None
+    proc_nature: Optional[str] = None
+    publish_from: Optional[str] = "01-Feb-2026"
+    publish_to: Optional[str] = None
+    max_pages: Optional[int] = 1
+    max_items_per_cycle: Optional[int] = 10
+    save_pdf: Optional[bool] = True
+
+
+class PrunePayload(BaseModel):
+    keep_from: Optional[datetime] = None
+    keyword_only: Optional[bool] = True
+
+
+class AlertTestPayload(BaseModel):
+    tender_id: Optional[str] = None
+
 # Allow your React Frontend (Vite) to talk to this Backend
 app.add_middleware(
     CORSMiddleware,
@@ -219,6 +255,43 @@ app.add_middleware(
 def read_tenders(db: Session = Depends(database.get_db)):
     tenders = db.query(models.Tender).all()
     return tenders
+
+
+@app.post("/scraper/run")
+def run_scraper_now(payload: ScraperRunPayload, db: Session = Depends(database.get_db)):
+    config = ScraperConfig(
+        keyword=payload.keyword or "",
+        proc_nature=payload.proc_nature or "",
+        publish_from=payload.publish_from or "01-Feb-2026",
+        publish_to=payload.publish_to or "",
+        max_pages=payload.max_pages or 1,
+        max_items_per_cycle=payload.max_items_per_cycle or 10,
+        save_pdf=bool(payload.save_pdf),
+        headless=True,
+    )
+    result = run_scraper(config)
+    return result
+
+
+@app.post("/tenders/prune")
+def prune_tenders(payload: PrunePayload, db: Session = Depends(database.get_db)):
+    keep_from = payload.keep_from or datetime(2026, 2, 1)
+
+    query = db.query(models.Tender).filter(
+        or_(models.Tender.deadline.is_(None), models.Tender.deadline < keep_from)
+    )
+
+    rows = query.all()
+    removed = 0
+    for row in rows:
+        if payload.keyword_only:
+            ai = row.ai_summary if isinstance(row.ai_summary, dict) else {}
+            if ai.get("keyword"):
+                continue
+        db.delete(row)
+        removed += 1
+    db.commit()
+    return {"removed": removed, "keep_from": keep_from.isoformat()}
 
 
 @app.get("/")
@@ -294,7 +367,9 @@ def ingest_tenders(payload: TenderIngestPayload, db: Session = Depends(database.
 
 @app.get("/tenders/{tender_id}")
 def get_tender(tender_id: str, db: Session = Depends(database.get_db)):
-    tender = db.query(models.Tender).filter(models.Tender.id == tender_id).first()
+    tender = db.query(models.Tender).filter(models.Tender.tender_id == tender_id).first()
+    if not tender:
+        tender = db.query(models.Tender).filter(models.Tender.id == tender_id).first()
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
     return tender
@@ -350,6 +425,33 @@ def mark_alert_read(alert_id: str, db: Session = Depends(database.get_db)):
         "read": item.is_read,
         "created_at": item.created_at.isoformat(),
     }
+
+
+@app.post("/alerts/test")
+def send_test_alert(payload: AlertTestPayload, db: Session = Depends(database.get_db)):
+    row = None
+    if payload.tender_id:
+        row = db.query(models.Tender).filter(models.Tender.tender_id == payload.tender_id).first()
+
+    if not row:
+        candidates = db.query(models.Tender).all()
+        for candidate in candidates:
+            ai = candidate.ai_summary if isinstance(candidate.ai_summary, dict) else {}
+            if ai.get("keyword") and ai.get("source_url"):
+                row = candidate
+                break
+
+    if not row:
+        return {"status": "skipped", "reason": "No matched tender with source URL found"}
+
+    item = {
+        "tender_id": row.tender_id,
+        "title": row.title,
+        "priority": row.priority,
+        "description": row.description,
+        "ai_summary": row.ai_summary if isinstance(row.ai_summary, dict) else {},
+    }
+    return send_telegram_alert([item])
 
 
 @app.get("/settings")
@@ -418,6 +520,29 @@ def get_documents(db: Session = Depends(database.get_db)):
             "title": item.title,
             "size_kb": item.size_kb,
             "status": item.status,
+            "download_url": f"/documents/{item.tender_ref}/download",
         }
         for item in rows
     ]
+
+
+@app.get("/documents/{tender_ref}/download")
+def download_document(tender_ref: str, db: Session = Depends(database.get_db)):
+    tender = db.query(models.Tender).filter(models.Tender.tender_id == tender_ref).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    ai = tender.ai_summary if isinstance(tender.ai_summary, dict) else {}
+    pdf_path = str(ai.get("pdf_saved_path", "")).strip()
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="Document not available")
+
+    file_path = Path(pdf_path)
+    if not file_path.exists() or file_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="Document file missing")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        filename=file_path.name,
+    )

@@ -50,6 +50,9 @@ export const alertAPI = {
 export const configAPI = {
   getSettings: () => api.get('/settings'),
   updateSettings: (data) => api.put('/settings', data),
+  runScraperNow: (data) => api.post('/scraper/run', data),
+  pruneTenders: (data) => api.post('/tenders/prune', data),
+  sendTestAlert: (data) => api.post('/alerts/test', data),
 };
 
 export const analysisAPI = {

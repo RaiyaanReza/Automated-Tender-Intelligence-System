@@ -8,5 +8,6 @@ __all__ = [
 	"egp_browser",
 	"egp_scout",
 	"main_scraper",
+	"notifier",
 	"parser",
 ]

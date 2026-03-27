@@ -7,3 +7,5 @@ playwright
 requests
 httpx
 beautifulsoup4
+PyPDF2
+huggingface_hub

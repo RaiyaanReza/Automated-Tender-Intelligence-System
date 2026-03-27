@@ -1,5 +1,19 @@
 import { Building2, Clock, DollarSign } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import useTenders from '../../hooks/useTenders';
+
+const EGP_BASE = 'https://www.eprocure.gov.bd/resources/common/';
+
+const normalizeLink = (value) => {
+  const link = String(value || '').trim();
+  if (!link) return '';
+  if (link.startsWith('http://') || link.startsWith('https://')) return link;
+  try {
+    return new URL(link, EGP_BASE).toString();
+  } catch {
+    return '';
+  }
+};
 
 const Tenders = () => {
   const { tenders, loading, error } = useTenders();
@@ -27,7 +41,9 @@ const Tenders = () => {
           <div key={tender.id} className="p-5 bg-base-300 rounded-xl border border-white/10">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-white">{tender.title}</h2>
+                <Link to={`/tenders/${tender.tender_id || tender.id}`} className="text-lg font-semibold text-white hover:text-cyan-300 underline-offset-4 hover:underline">
+                  {tender.title}
+                </Link>
                 <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-gray-400">
                   <span className="inline-flex items-center gap-1">
                     <Building2 className="h-4 w-4" />
@@ -41,6 +57,21 @@ const Tenders = () => {
                     <DollarSign className="h-4 w-4 text-emerald-400" />
                     {tender.value}
                   </span>
+                  {tender?.ai_summary?.keyword ? (
+                    <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-xs text-cyan-300">
+                      {tender.ai_summary.keyword}
+                    </span>
+                  ) : null}
+                  {normalizeLink(tender?.ai_summary?.source_url || tender?.ai_summary?.detail_url) ? (
+                    <a
+                      href={normalizeLink(tender?.ai_summary?.source_url || tender?.ai_summary?.detail_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-gray-300 hover:text-cyan-300 underline"
+                    >
+                      Source Link
+                    </a>
+                  ) : null}
                 </div>
               </div>
               <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-300">

@@ -7,6 +7,7 @@ import { lazy, Suspense } from 'react';
 // Lazy load pages for better initial load time
 const Dashboard = lazy(() => import('./features/dashboard/DashboardView'));
 const Tenders = lazy(() => import('./features/tenders/Tenders'));
+const TenderDetails = lazy(() => import('./features/tenders/TenderDetails'));
 const Analysis = lazy(() => import('./features/analysis/Analysis'));
 const Documents = lazy(() => import('./features/documents/Documents'));
 const Sources = lazy(() => import('./features/sources/Sources'));
@@ -33,7 +34,7 @@ function App() {
           
           {/* Tender Management */}
           <Route path="/tenders" element={<Tenders />} />
-          <Route path="/tenders/:id" element={<Tenders />} />
+          <Route path="/tenders/:id" element={<TenderDetails />} />
           
           {/* AI & Analysis */}
           <Route path="/analysis" element={<Analysis />} />
