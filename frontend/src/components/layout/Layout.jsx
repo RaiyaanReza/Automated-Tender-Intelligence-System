@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Bell, UserCircle2 } from 'lucide-react';

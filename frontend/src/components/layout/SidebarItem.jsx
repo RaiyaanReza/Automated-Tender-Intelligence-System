@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { NavLink } from 'react-router-dom';
 
 const SidebarItem = ({ icon: Icon, label, path, badge = null, isDanger = false, onClick }) => {

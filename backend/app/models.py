@@ -1,24 +1,56 @@
-"""
-models.py
+from datetime import datetime
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, JSON
+from .database import Base
+import uuid
 
-SQLAlchemy models placeholder for Tender, Analysis, and Logs.
+class Tender(Base):
+    __tablename__ = "tenders"
 
-The backend developer should define models consistent with the frontend
-`Tender` shape expected by the React app.
-"""
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tender_id = Column(String, unique=True, index=True) # e-GP ID
+    title = Column(String, nullable=False)
+    organization = Column(String)
+    deadline = Column(DateTime)
+    value = Column(String, nullable=True)     # For showing on dashboard
+    priority = Column(String, default="Low")  # AI calculated: High, Medium, Low
+    status = Column(String, default="new")    # new, relevant, ignored, applied
+    description = Column(Text, nullable=True) # Full scraped text
+    ai_summary = Column(JSON, nullable=True)  # Store Gemini's structured output here
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    message = Column(String, nullable=False)
+    level = Column(String, default="info")
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Example model outlines (to be implemented):
-# class Tender(Base):
-#     __tablename__ = 'tenders'
-#     id = Column(String, primary_key=True)
-#     title = Column(String)
-#     organization = Column(String)
-#     deadline = Column(DateTime)
-#     value = Column(String)
-#     priority = Column(String)
-#     status = Column(String)
+class AppSetting(Base):
+    __tablename__ = "app_settings"
 
-raise NotImplementedError("Define SQLAlchemy models for Tender, Analysis, and Logs")
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
+class Source(Base):
+    __tablename__ = "sources"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False, unique=True)
+    source_type = Column(String, default="web-scraper", nullable=False)
+    status = Column(String, default="active", nullable=False)
+    records_detected = Column(Integer, default=0, nullable=False)
+    last_sync = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tender_ref = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    size_kb = Column(Integer, default=0, nullable=False)
+    status = Column(String, default="indexed", nullable=False)

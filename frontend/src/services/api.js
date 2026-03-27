@@ -39,6 +39,7 @@ export const tenderAPI = {
   getById: (id) => api.get(`/tenders/${id}`),
   getSummary: (id) => api.get(`/tenders/${id}/summary`),
   updateStatus: (id, status) => api.patch(`/tenders/${id}/status`, { status }),
+  getDashboardStats: () => api.get('/dashboard/stats'),
 };
 
 export const alertAPI = {
@@ -49,6 +50,18 @@ export const alertAPI = {
 export const configAPI = {
   getSettings: () => api.get('/settings'),
   updateSettings: (data) => api.put('/settings', data),
+};
+
+export const analysisAPI = {
+  getAll: () => api.get('/analysis'),
+};
+
+export const sourceAPI = {
+  getAll: () => api.get('/sources'),
+};
+
+export const documentAPI = {
+  getAll: () => api.get('/documents'),
 };
 
 export default api;

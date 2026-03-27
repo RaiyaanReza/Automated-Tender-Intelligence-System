@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -12,19 +13,20 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Modal from '../../components/ui/Modal';
+import useTenders from '../../hooks/useTenders';
 
 const DashboardView = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [selectedTender, setSelectedTender] = useState(null);
   const [selectedQuickAction, setSelectedQuickAction] = useState(null);
+  const { tenders, loading, error, stats: statsData } = useTenders();
 
-  // Future backend integration: replace hardcoded arrays with API payloads.
   const stats = [
     {
       icon: FileText,
       label: 'Total Tenders',
-      value: '156',
-      change: '+12%',
+      value: String(statsData.total),
+      change: `${statsData.total} records`,
       trend: 'up',
       color: 'from-red-500 to-red-700',
       bg: 'bg-red-500/10',
@@ -33,8 +35,8 @@ const DashboardView = () => {
     {
       icon: CheckCircle,
       label: 'Relevant',
-      value: '43',
-      change: '+5%',
+      value: String(statsData.relevant),
+      change: 'High/Urgent',
       trend: 'up',
       color: 'from-emerald-500 to-emerald-700',
       bg: 'bg-emerald-500/10',
@@ -43,9 +45,9 @@ const DashboardView = () => {
     {
       icon: Clock,
       label: 'Pending Review',
-      value: '18',
-      change: '-3%',
-      trend: 'down',
+      value: String(statsData.pending),
+      change: 'new/review',
+      trend: 'up',
       color: 'from-amber-500 to-amber-700',
       bg: 'bg-amber-500/10',
       borderColor: 'border-amber-500/20',
@@ -53,44 +55,15 @@ const DashboardView = () => {
     {
       icon: TrendingUp,
       label: 'Success Rate',
-      value: '87%',
-      change: '+8%',
+      value: statsData.successRate,
+      change: 'match ratio',
       trend: 'up',
       color: 'from-blue-500 to-blue-700',
       bg: 'bg-blue-500/10',
       borderColor: 'border-blue-500/20',
     },
   ];
-
-  const recentTenders = [
-    {
-      id: 1,
-      title: 'Network Infrastructure Upgrade',
-      organization: 'Ministry of Communications',
-      deadline: '5 days left',
-      value: '$2.5M',
-      priority: 'High',
-      status: 'new',
-    },
-    {
-      id: 2,
-      title: 'Cloud Services Procurement',
-      organization: 'National IT Authority',
-      deadline: '12 days left',
-      value: '$1.8M',
-      priority: 'Medium',
-      status: 'review',
-    },
-    {
-      id: 3,
-      title: 'Cybersecurity Solutions',
-      organization: 'Defense Department',
-      deadline: '3 days left',
-      value: '$3.2M',
-      priority: 'Urgent',
-      status: 'urgent',
-    },
-  ];
+  const recentTenders = tenders.slice(0, 5);
 
   const quickActions = useMemo(
     () => [
@@ -227,6 +200,24 @@ const DashboardView = () => {
             </Link>
           </div>
 
+          {loading ? (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+              Loading tenders from backend...
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+              {error}
+            </div>
+          ) : null}
+
+          {!loading && !error && recentTenders.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+              No tenders found in database.
+            </div>
+          ) : null}
+
           <div className="space-y-4">
             {recentTenders.map((tender, index) => (
               <motion.div
@@ -265,7 +256,7 @@ const DashboardView = () => {
                     <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-sm">
                       <div className="flex items-center gap-2 text-gray-400">
                         <Clock className="w-4 h-4 text-amber-400" />
-                        <span>{tender.deadline}</span>
+                        <span>{tender.deadlineLabel}</span>
                       </div>
                       <div className="flex items-center gap-2 text-gray-400">
                         <DollarSign className="w-4 h-4 text-emerald-400" />
@@ -324,15 +315,15 @@ const DashboardView = () => {
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Tenders Scanned</span>
-                <span className="text-white font-semibold">1,247</span>
+                <span className="text-white font-semibold">{statsData.total}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Matches Found</span>
-                <span className="text-emerald-400 font-semibold">+43</span>
+                <span className="text-emerald-400 font-semibold">{statsData.relevant}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">AI Analysis</span>
-                <span className="text-blue-400 font-semibold">28 done</span>
+                <span className="text-blue-400 font-semibold">{statsData.pending} pending</span>
               </div>
             </div>
           </div>
