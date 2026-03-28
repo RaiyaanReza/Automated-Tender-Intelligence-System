@@ -18,10 +18,19 @@ const formatDateLabel = (value) => {
 	return `${diffDays} days left`;
 };
 
+const formatPublishedLabel = (value) => {
+	if (!value) return 'Publishing date unavailable';
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return 'Publishing date unavailable';
+	return date.toLocaleString();
+};
+
 const normalizeTender = (tender) => ({
 	...tender,
 	organization: getTenderOrganization(tender),
 	deadlineLabel: formatDateLabel(tender.deadline),
+	publishedAt: tender?.ai_summary?.publishing_date || tender?.deadline || null,
+	publishedLabel: formatPublishedLabel(tender?.ai_summary?.publishing_date || tender?.deadline),
 	priority: tender.priority || 'Low',
 	value: tender.value || 'N/A',
 	status: tender.status || 'new',
@@ -29,7 +38,7 @@ const normalizeTender = (tender) => ({
 
 const asTime = (value) => {
 	const ts = new Date(value).getTime();
-	return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
+	return Number.isNaN(ts) ? Number.MIN_SAFE_INTEGER : ts;
 };
 
 const isWithinRecentWindow = (deadline, days = DAYS_WINDOW) => {
@@ -42,9 +51,10 @@ const isWithinRecentWindow = (deadline, days = DAYS_WINDOW) => {
 	return diffDays >= -days && diffDays <= days;
 };
 
-const hasKeywordTrace = (tender) => {
-	const ai = tender?.ai_summary;
-	return Boolean(ai && typeof ai === 'object' && ai.keyword);
+const recencyScore = (tender) => {
+	const published = tender?.ai_summary?.publishing_date;
+	if (published) return asTime(published);
+	return asTime(tender?.deadline);
 };
 
 export default function useTenders() {
@@ -63,14 +73,13 @@ export default function useTenders() {
 		setError('');
 		try {
 			const [response, statsResponse] = await Promise.all([
-				tenderAPI.getAll(),
+				tenderAPI.getAll({ limit: 250, sort_by: 'deadline', order: 'desc' }),
 				tenderAPI.getDashboardStats(),
 			]);
 			const payload = Array.isArray(response.data) ? response.data : [];
 			const recent = payload.filter((item) => isWithinRecentWindow(item?.deadline));
-			const keywordRecent = recent.filter(hasKeywordTrace);
-			const effective = (keywordRecent.length > 0 ? keywordRecent : recent)
-				.sort((a, b) => asTime(a.deadline) - asTime(b.deadline));
+			const base = recent.length > 0 ? recent : payload;
+			const effective = base.sort((a, b) => recencyScore(b) - recencyScore(a));
 
 			setTenders(effective.map(normalizeTender));
 
@@ -81,10 +90,10 @@ export default function useTenders() {
 
 			const serverStats = statsResponse?.data || {};
 			setStats({
-				total,
-				relevant,
-				pending,
-				successRate: typeof serverStats.success_rate === 'string' && total === 0 ? serverStats.success_rate : successRate,
+				total: Number(serverStats.total ?? total),
+				relevant: Number(serverStats.relevant ?? relevant),
+				pending: Number(serverStats.pending ?? pending),
+				successRate: typeof serverStats.success_rate === 'string' ? serverStats.success_rate : successRate,
 			});
 		} catch (err) {
 			setError(err?.response?.data?.detail || 'Failed to load tenders.');

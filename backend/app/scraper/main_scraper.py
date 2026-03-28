@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urljoin
 import os
+import math
 
 import httpx
 
@@ -52,6 +53,7 @@ class ScraperConfig:
     download_dir: str = "downloads/tenders"
     publish_from: str = "01-Feb-2026"
     publish_to: str = ""
+    stop_requested: Optional[Callable[[], bool]] = None
 
 
 def _should_prioritize_title(title: str) -> bool:
@@ -130,6 +132,24 @@ def _try_apply_keyword_search(page, keyword: str) -> None:
             return
         except Exception:
             continue
+
+
+def _matches_keyword(keyword: str, *fields: str) -> bool:
+    target = str(keyword or "").strip().lower()
+    if not target:
+        return True
+
+    haystack = " ".join(str(field or "") for field in fields).lower()
+    if not haystack:
+        return False
+
+    if target in haystack:
+        return True
+
+    terms = [token for token in target.replace("/", " ").replace("-", " ").split() if token]
+    if not terms:
+        return False
+    return all(term in haystack for term in terms)
 
 
 def _try_apply_advanced_search(page, keyword: str, proc_nature: str, publish_from: str = "", publish_to: str = "") -> bool:
@@ -225,6 +245,16 @@ def _within_deadline_window(iso_deadline: str, window_days: int) -> bool:
     return (now - timedelta(days=window_days)) <= deadline <= (now + timedelta(days=window_days))
 
 
+def _is_stop_requested(cfg: ScraperConfig) -> bool:
+    checker = cfg.stop_requested
+    if not checker:
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        return False
+
+
 def _save_pdf_if_needed(cfg: ScraperConfig, tender_id: str, pdf_url: str) -> Optional[str]:
     if not (cfg.save_pdf and pdf_url):
         return None
@@ -311,6 +341,7 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
         "new_rows": 0,
         "skipped_existing": 0,
         "skipped_deadline": 0,
+        "stopped": False,
         "ingested": {"inserted": 0, "updated": 0, "received": 0},
         "alerts": {"status": "skipped", "reason": "not-run"},
     }
@@ -318,6 +349,7 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
     with httpx.Client(timeout=max(10.0, cfg.timeout_ms / 1000.0)) as api_client:
         existing_tenders = _load_existing_tenders(api_client, cfg.api_base_url)
         existing_ids = set(existing_tenders.keys())
+        queued_ids: Set[str] = set()
         items_to_ingest: List[Dict[str, Any]] = []
         inserted_candidates: List[Dict[str, Any]] = []
 
@@ -332,9 +364,16 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                 plan = [{"keyword": keyword, "proc_nature": ""} for keyword in DEFAULT_KEYWORDS]
 
         with browser_session(browser_cfg) as (_, context, page):
+            per_query_cap = max(1, math.ceil(cfg.max_items_per_cycle / max(1, len(plan))))
             for query in plan:
+                if _is_stop_requested(cfg):
+                    metrics["stopped"] = True
+                    break
+
                 if len(items_to_ingest) >= cfg.max_items_per_cycle:
                     break
+
+                query_inserted = 0
 
                 page.goto(cfg.advanced_url, wait_until="domcontentloaded")
                 page.wait_for_selector("table tr")
@@ -351,13 +390,24 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                     _try_apply_keyword_search(page, keyword)
 
                 for _ in range(cfg.max_pages):
+                    if _is_stop_requested(cfg):
+                        metrics["stopped"] = True
+                        break
+
                     page.wait_for_selector("table tr")
                     listing_rows = extract_tender_list(page.content())
                     metrics["pages_scanned"] += 1
                     metrics["rows_seen"] += len(listing_rows)
 
                     for row in listing_rows:
+                        if _is_stop_requested(cfg):
+                            metrics["stopped"] = True
+                            break
+
                         if len(items_to_ingest) >= cfg.max_items_per_cycle:
+                            break
+
+                        if query_inserted >= per_query_cap:
                             break
 
                         tender_id = (row.get("tender_id") or "").strip()
@@ -367,6 +417,9 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
 
                         if not tender_id:
                             tender_id = f"EGP-AUTO-{abs(hash(title)) % 1000000000}"
+
+                        if tender_id in queued_ids:
+                            continue
 
                         if tender_id in existing_ids:
                             existing = existing_tenders.get(tender_id, {})
@@ -403,6 +456,15 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                         eligibility = str(details.get("eligibility", ""))
                         location = str(details.get("location", ""))
 
+                        if keyword and not _matches_keyword(
+                            keyword,
+                            title,
+                            row.get("organization"),
+                            eligibility,
+                            details.get("description", ""),
+                        ):
+                            continue
+
                         save_as_pdf_url = str(details.get("save_as_pdf_url", ""))
                         absolute_pdf_url = urljoin(page.url, save_as_pdf_url) if save_as_pdf_url else ""
                         pdf_text = ""
@@ -433,6 +495,10 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                             else f"https://www.eprocure.gov.bd/resources/common/ViewTender.jsp?id={tender_id}&h=t"
                         )
 
+                        detail_fields = details.get("detail_fields") if isinstance(details, dict) else {}
+                        if not isinstance(detail_fields, dict):
+                            detail_fields = {}
+
                         item = {
                             "tender_id": tender_id,
                             "title": title,
@@ -449,22 +515,36 @@ def run_scraper(config: Optional[ScraperConfig] = None) -> Dict[str, Any]:
                                 "publishing_date": publishing_date,
                                 "detail_url": detail_url,
                                 "source_url": source_url,
+                                "save_as_pdf_url": absolute_pdf_url,
+                                "tender_security_amount": details.get("tender_security_amount", ""),
+                                "location": details.get("location", ""),
+                                "eligibility": details.get("eligibility", ""),
+                                "detail_fields": detail_fields,
                                 "pdf_saved_path": saved_pdf_path or "",
                             },
                         }
                         items_to_ingest.append(item)
                         inserted_candidates.append(item)
+                        queued_ids.add(tender_id)
                         existing_ids.add(tender_id)
                         metrics["new_rows"] += 1
+                        query_inserted += 1
 
                     if len(items_to_ingest) >= cfg.max_items_per_cycle:
+                        break
+                    if metrics["stopped"]:
                         break
                     if not _goto_next_page(page):
                         break
 
+                if metrics["stopped"]:
+                    break
+
         ingest_result = _ingest_items(api_client, cfg.api_base_url, items_to_ingest)
         metrics["ingested"] = ingest_result
-        if ingest_result.get("inserted", 0) > 0:
+        if metrics["stopped"] and ingest_result.get("inserted", 0) == 0:
+            metrics["alerts"] = {"status": "skipped", "reason": "stopped"}
+        elif ingest_result.get("inserted", 0) > 0:
             metrics["alerts"] = send_telegram_alert(inserted_candidates)
         else:
             metrics["alerts"] = {"status": "skipped", "reason": "nothing inserted"}

@@ -1,10 +1,14 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, JSON
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, JSON, Index
 from .database import Base
 import uuid
 
 class Tender(Base):
     __tablename__ = "tenders"
+    __table_args__ = (
+        Index("ix_tenders_priority_status", "priority", "status"),
+        Index("ix_tenders_deadline", "deadline"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     tender_id = Column(String, unique=True, index=True) # e-GP ID

@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowUpRight,
@@ -17,6 +17,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import Modal from '../../components/ui/Modal';
 import useTenders from '../../hooks/useTenders';
 import {
+  buildTenderDetailsPath,
   cleanSummaryText,
   extractSummaryBullets,
   formatDateTimeLabel,
@@ -35,8 +36,51 @@ const DashboardView = () => {
     deadlineWindow: '30',
   });
   const [isSubmittingSearch, setIsSubmittingSearch] = useState(false);
+  const [isStoppingScraper, setIsStoppingScraper] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
+  const [scraperStatus, setScraperStatus] = useState({
+    running: false,
+    stop_requested: false,
+    started_at: null,
+    finished_at: null,
+    last_result: null,
+    last_error: null,
+  });
+  const wasScraperRunningRef = useRef(false);
   const { tenders, loading, error, stats: statsData, reload: reloadTenders } = useTenders();
+
+  const loadScraperStatus = useCallback(async () => {
+    try {
+      const response = await configAPI.getScraperStatus();
+      setScraperStatus(response?.data || {});
+    } catch {
+      // Keep existing state if status endpoint is temporarily unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadScraperStatus();
+    const timer = setInterval(loadScraperStatus, 5000);
+    return () => clearInterval(timer);
+  }, [loadScraperStatus]);
+
+  useEffect(() => {
+    const wasRunning = wasScraperRunningRef.current;
+    const isRunning = Boolean(scraperStatus?.running);
+
+    if (wasRunning && !isRunning) {
+      void reloadTenders();
+      if (scraperStatus?.last_error) {
+        setActionMessage(`Scraper failed: ${scraperStatus.last_error}`);
+      } else if (scraperStatus?.last_result?.stopped) {
+        setActionMessage('Scraper stopped. Partial results were synchronized.');
+      } else {
+        setActionMessage('Scraper completed and dashboard refreshed.');
+      }
+    }
+
+    wasScraperRunningRef.current = isRunning;
+  }, [reloadTenders, scraperStatus]);
 
   const stats = [
     {
@@ -124,29 +168,64 @@ const DashboardView = () => {
     navigate(route);
   };
 
-  const handleSearchSubmit = async () => {
-    const query = String(searchForm.query || '').trim();
-    if (!query) {
-      setActionMessage('Please enter a keyword before running search.');
+  const handleStartScraper = async ({ closeModal = false } = {}) => {
+    if (scraperStatus?.running) {
+      setActionMessage('Scraper is already running.');
       return;
+    }
+
+    const query = String(searchForm.query || '').trim();
+    const keywordList = query
+      .split(/[,\n;|]+/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const payload = {
+      max_pages: 3,
+      max_items_per_cycle: 50,
+      max_deadline_window_days: Number.parseInt(searchForm.deadlineWindow, 10) || 30,
+      save_pdf: true,
+    };
+
+    if (keywordList.length === 1) {
+      payload.keyword = keywordList[0];
+    }
+    if (keywordList.length > 1) {
+      payload.keywords = keywordList;
     }
 
     setIsSubmittingSearch(true);
     setActionMessage('');
     try {
-      await configAPI.runScraperNow({
-        keyword: query,
-        max_pages: 1,
-        max_items_per_cycle: 10,
-        save_pdf: true,
-      });
-      await reloadTenders();
-      setActionMessage('Search completed and dashboard refreshed.');
-      setIsSearchModalOpen(false);
+      await configAPI.startScraper(payload);
+      if (closeModal) {
+        setIsSearchModalOpen(false);
+      }
+      setActionMessage('Live scraping started. Use Stop to halt anytime.');
+      await loadScraperStatus();
     } catch (runError) {
-      setActionMessage(runError?.response?.data?.detail || 'Failed to run scraper search.');
+      setActionMessage(runError?.response?.data?.detail || 'Failed to start scraper.');
     } finally {
       setIsSubmittingSearch(false);
+    }
+  };
+
+  const handleStopScraper = async () => {
+    if (!scraperStatus?.running) {
+      setActionMessage('Scraper is not running.');
+      return;
+    }
+
+    setIsStoppingScraper(true);
+    setActionMessage('');
+    try {
+      await configAPI.stopScraper();
+      setActionMessage('Stop requested. Scraper will halt safely after current step.');
+      await loadScraperStatus();
+    } catch (stopError) {
+      setActionMessage(stopError?.response?.data?.detail || 'Failed to stop scraper.');
+    } finally {
+      setIsStoppingScraper(false);
     }
   };
 
@@ -176,16 +255,40 @@ const DashboardView = () => {
           </motion.p>
         </div>
 
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          type="button"
-          onClick={() => setIsSearchModalOpen(true)}
-          className="btn-primary flex items-center gap-2 self-start px-5 py-3 text-sm sm:px-7 sm:py-3.5 sm:text-base lg:self-auto"
-        >
-          <Target className="h-5 w-5" />
-          <span>New Tender Search</span>
-        </motion.button>
+        <div className="flex flex-wrap items-center gap-3">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            type="button"
+            onClick={() => setIsSearchModalOpen(true)}
+            className="btn-primary flex items-center gap-2 self-start px-5 py-3 text-sm sm:px-7 sm:py-3.5 sm:text-base lg:self-auto"
+          >
+            <Target className="h-5 w-5" />
+            <span>New Tender Search</span>
+          </motion.button>
+
+          {scraperStatus?.running ? (
+            <button
+              type="button"
+              onClick={handleStopScraper}
+              disabled={isStoppingScraper}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="h-2 w-2 rounded-full bg-red-300" />
+              {isStoppingScraper ? 'Stopping...' : 'Stop Scraper'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleStartScraper()}
+              disabled={isSubmittingSearch}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-300" />
+              {isSubmittingSearch ? 'Starting...' : 'Start Scraper'}
+            </button>
+          )}
+        </div>
       </motion.div>
 
       {actionMessage ? (
@@ -193,6 +296,18 @@ const DashboardView = () => {
           {actionMessage}
         </div>
       ) : null}
+
+      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-gray-200">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="inline-flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${scraperStatus?.running ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
+            <span>{scraperStatus?.running ? 'Scraper Running' : 'Scraper Idle'}</span>
+          </div>
+          {scraperStatus?.started_at ? <span className="text-gray-400">Started: {formatDateTimeLabel(scraperStatus.started_at)}</span> : null}
+          {scraperStatus?.finished_at ? <span className="text-gray-400">Finished: {formatDateTimeLabel(scraperStatus.finished_at)}</span> : null}
+          {scraperStatus?.last_result?.new_rows ? <span className="text-emerald-300">Latest New Rows: {scraperStatus.last_result.new_rows}</span> : null}
+        </div>
+      </div>
 
       <motion.div
         variants={containerVariants}
@@ -298,6 +413,10 @@ const DashboardView = () => {
 
                       <div className="flex flex-wrap items-center gap-3 text-sm sm:gap-6">
                         <div className="flex items-center gap-2 text-gray-400">
+                          <CalendarClock className="h-4 w-4 text-cyan-300" />
+                          <span>{tender.publishedLabel}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-400">
                           <Clock className="h-4 w-4 text-amber-400" />
                           <span>{tender.deadlineLabel}</span>
                         </div>
@@ -385,7 +504,7 @@ const DashboardView = () => {
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
         title="New Tender Search"
-        description="Working modal with fields ready to connect to backend search API."
+        description="Starts a background scrape run with your filters and keeps dashboard responsive."
         size="md"
         footer={
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -398,11 +517,11 @@ const DashboardView = () => {
             </button>
             <button
               type="button"
-              onClick={handleSearchSubmit}
-              disabled={isSubmittingSearch}
+              onClick={() => handleStartScraper({ closeModal: true })}
+              disabled={isSubmittingSearch || scraperStatus?.running}
               className="rounded-xl bg-gradient-to-r from-red-600 to-red-700 px-4 py-2 text-sm font-semibold text-white hover:from-red-500 hover:to-red-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmittingSearch ? 'Running...' : 'Run Search'}
+              {scraperStatus?.running ? 'Already Running' : isSubmittingSearch ? 'Starting...' : 'Start Background Scrape'}
             </button>
           </div>
         }
@@ -412,10 +531,11 @@ const DashboardView = () => {
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Query</span>
             <input
               className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-red-500/50"
-              placeholder="e.g. cybersecurity, network infra, cloud"
+              placeholder="e.g. internet, bandwidth, fiber optic (comma or new line separated)"
               value={searchForm.query}
               onChange={(event) => setSearchForm((prev) => ({ ...prev, query: event.target.value }))}
             />
+            <p className="text-[11px] text-gray-500">Leave empty to run full weighted keyword plan across all configured sectors.</p>
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Budget (Min)</span>
@@ -433,9 +553,10 @@ const DashboardView = () => {
               value={searchForm.deadlineWindow}
               onChange={(event) => setSearchForm((prev) => ({ ...prev, deadlineWindow: event.target.value }))}
             >
-              <option className="bg-[#111]">7 days</option>
-              <option className="bg-[#111]">14 days</option>
-              <option className="bg-[#111]">30 days</option>
+              <option value="7" className="bg-[#111]">7 days</option>
+              <option value="14" className="bg-[#111]">14 days</option>
+              <option value="30" className="bg-[#111]">30 days</option>
+              <option value="45" className="bg-[#111]">45 days</option>
             </select>
           </label>
         </form>
@@ -469,7 +590,7 @@ const DashboardView = () => {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Link
-                to={`/tenders/${encodeURIComponent(selectedTender.tender_id || selectedTender.id)}`}
+                to={buildTenderDetailsPath(selectedTender)}
                 onClick={() => setSelectedTender(null)}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 font-medium text-gray-100 transition hover:border-cyan-400/40 hover:bg-cyan-500/10"
               >

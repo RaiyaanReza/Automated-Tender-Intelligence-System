@@ -16,7 +16,7 @@ import {
 import SidebarItem from './SidebarItem';
 import MobileMenu from './MobileMenu';
 import Modal from '../ui/Modal';
-import { alertAPI, documentAPI, sourceAPI, tenderAPI } from '../../services/api';
+import { alertAPI, dashboardAPI, documentAPI, sourceAPI, tenderAPI } from '../../services/api';
 
 const Sidebar = () => {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -32,6 +32,22 @@ const Sidebar = () => {
     let isActive = true;
 
     const loadCounts = async () => {
+      try {
+        const sidebarRes = await dashboardAPI.getSidebarCounts();
+        if (!isActive) return;
+
+        const payload = sidebarRes?.data || {};
+        setCounts({
+          tenders: Number(payload.tenders) || 0,
+          alerts: Number(payload.alerts) || 0,
+          documents: Number(payload.documents) || 0,
+          sources: Number(payload.sources) || 0,
+        });
+        return;
+      } catch {
+        // Fallback to legacy multi-request mode if aggregate endpoint is unavailable.
+      }
+
       try {
         const [tendersRes, alertsRes, docsRes, sourcesRes] = await Promise.all([
           tenderAPI.getAll(),

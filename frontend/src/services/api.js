@@ -35,11 +35,16 @@ api.interceptors.response.use(
 
 // API Endpoint Helpers
 export const tenderAPI = {
-  getAll: () => api.get('/tenders'),
-  getById: (id) => api.get(`/tenders/${id}`),
-  getSummary: (id) => api.get(`/tenders/${id}/summary`),
-  updateStatus: (id, status) => api.patch(`/tenders/${id}/status`, { status }),
+  getAll: (params = {}) => api.get('/tenders', { params }),
+  getById: (id) => api.get(`/tenders/${encodeURIComponent(id)}`),
+  resolveByRef: (ref) => api.get('/tenders/resolve', { params: { ref } }),
+  getSummary: (id) => api.get(`/tenders/${encodeURIComponent(id)}/summary`),
+  updateStatus: (id, status) => api.patch(`/tenders/${encodeURIComponent(id)}/status`, { status }),
   getDashboardStats: () => api.get('/dashboard/stats'),
+};
+
+export const dashboardAPI = {
+  getSidebarCounts: () => api.get('/dashboard/sidebar-counts'),
 };
 
 export const alertAPI = {
@@ -51,6 +56,9 @@ export const configAPI = {
   getSettings: () => api.get('/settings'),
   updateSettings: (data) => api.put('/settings', data),
   runScraperNow: (data) => api.post('/scraper/run', data),
+  startScraper: (data) => api.post('/scraper/start', data),
+  stopScraper: () => api.post('/scraper/stop'),
+  getScraperStatus: () => api.get('/scraper/status'),
   pruneTenders: (data) => api.post('/tenders/prune', data),
   sendTestAlert: (data) => api.post('/alerts/test', data),
 };

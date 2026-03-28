@@ -35,6 +35,12 @@ def _sanitize_detail_text(value: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip(" |")
 
+
+def _normalize_label_key(label: str) -> str:
+    cleaned = _clean_text(label).lower().rstrip(":")
+    cleaned = re.sub(r"[^a-z0-9]+", "_", cleaned)
+    return cleaned.strip("_")
+
 def download_and_extract_pdf_text(pdf_url: str, timeout: int = 30) -> str:
     """Download a PDF from an absolute URL and extract its text into a string."""
     if not pdf_url:
@@ -268,7 +274,10 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
         "location": "",
         "description": "",
         "save_as_pdf_url": "",
+        "detail_fields": {},
     }
+
+    detail_fields: Dict[str, str] = {}
 
     # Parse common table layout where left cell contains field names.
     for tr in soup.select("tr"):
@@ -279,6 +288,9 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
         value = _clean_text(cells[1].get_text(" ", strip=True))
         if not label or not value:
             continue
+        key = _normalize_label_key(label)
+        if key and key not in detail_fields:
+            detail_fields[key] = _sanitize_detail_text(value)
         if label in _DETAIL_LABEL_MAP:
             details[_DETAIL_LABEL_MAP[label]] = _sanitize_detail_text(value)
 
@@ -313,8 +325,9 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
         details["location"],
     ]
     details["description"] = _sanitize_detail_text(" | ".join([part for part in info_parts if part]))
+    details["detail_fields"] = detail_fields
 
-    pdf_link = soup.find("a", href=True, text=re.compile("save as pdf", flags=re.IGNORECASE))
+    pdf_link = soup.find("a", href=True, string=re.compile("save as pdf", flags=re.IGNORECASE))
     if not pdf_link:
         pdf_link = soup.find("a", href=True, attrs={"title": re.compile("pdf", flags=re.IGNORECASE)})
     if not pdf_link:
@@ -325,12 +338,31 @@ def extract_tender_details(html: str) -> Dict[str, Any]:
         href = str(pdf_link.get("href", ""))
         if not href and pdf_link.get("onclick"):
             onclick_text = _clean_text(str(pdf_link.get("onclick", "")))
-            match = re.search(r"([^'\"\s)]+\.pdf(?:\?[^'\"\s)]*)?)", onclick_text, flags=re.IGNORECASE)
+            match = re.search(
+                r"(TenderNotice\.jsp[^'\"\s)]*|[^'\"\s)]+\.pdf(?:\?[^'\"\s)]*)?)",
+                onclick_text,
+                flags=re.IGNORECASE,
+            )
             if match:
                 href = match.group(1)
         cleaned = _clean_text(href)
-        if re.search(r"\.pdf($|\?)", cleaned, flags=re.IGNORECASE):
+        if re.search(r"(\.pdf($|\?)|TenderNotice\.jsp)", cleaned, flags=re.IGNORECASE):
             details["save_as_pdf_url"] = cleaned
+
+    if not details["save_as_pdf_url"]:
+        for element in soup.select("[onclick]"):
+            onclick_text = _clean_text(str(element.get("onclick", "")))
+            if not onclick_text:
+                continue
+            match = re.search(
+                r"(TenderNotice\.jsp[^'\"\s)]*|[^'\"\s)]+\.pdf(?:\?[^'\"\s)]*)?)",
+                onclick_text,
+                flags=re.IGNORECASE,
+            )
+            if not match:
+                continue
+            details["save_as_pdf_url"] = _clean_text(match.group(1))
+            break
 
     return details
 

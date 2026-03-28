@@ -1,7 +1,7 @@
 import { Building2, Clock, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import useTenders from '../../hooks/useTenders';
-import { getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
+import { buildTenderDetailsPath, getTenderOrganization, resolveTenderSourceUrl } from '../../utils/helpers';
 
 const Tenders = () => {
   const { tenders, loading, error } = useTenders();
@@ -31,7 +31,7 @@ const Tenders = () => {
           <div key={tender.id} className="p-5 bg-base-300 rounded-xl border border-white/10">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <Link to={`/tenders/${encodeURIComponent(tender.tender_id || tender.id)}`} className="text-lg font-semibold text-white hover:text-cyan-300 underline-offset-4 hover:underline">
+                <Link to={buildTenderDetailsPath(tender)} className="text-lg font-semibold text-white hover:text-cyan-300 underline-offset-4 hover:underline">
                   {tender.title}
                 </Link>
                 <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-gray-400">

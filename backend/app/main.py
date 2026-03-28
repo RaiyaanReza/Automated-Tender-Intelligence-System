@@ -1,13 +1,17 @@
 from typing import Optional
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse
+from threading import Event, Lock, Thread
+import uuid
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import case, func, or_
 from . import models, database
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import httpx
 from pydantic import BaseModel
 from .scraper.main_scraper import ScraperConfig, run_scraper
 from .scraper.notifier import send_telegram_alert
@@ -16,6 +20,20 @@ from .scraper.notifier import send_telegram_alert
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI()
+
+SCRAPER_LOCK = Lock()
+SCRAPER_THREAD: Optional[Thread] = None
+SCRAPER_STOP_EVENT: Optional[Event] = None
+SCRAPER_STATE = {
+    "running": False,
+    "stop_requested": False,
+    "job_id": None,
+    "started_at": None,
+    "finished_at": None,
+    "last_result": None,
+    "last_error": None,
+    "params": {},
+}
 
 DEFAULT_SETTINGS = {
     "refresh_interval_minutes": "15",
@@ -84,11 +102,18 @@ def seed_demo_tenders_if_empty(db: Session):
 
 def remove_demo_tenders(db: Session):
     # Drop non-production seed rows so UI remains fully data-driven from scraper ingestion.
-    demo_rows = db.query(models.Tender).filter(models.Tender.tender_id.like("EGP-%")).all()
-    if not demo_rows:
+    deleted = (
+        db.query(models.Tender)
+        .filter(
+            or_(
+                models.Tender.tender_id.like("EGP-%"),
+                models.Tender.tender_id.like("ATIS-%"),
+            )
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted <= 0:
         return
-    for row in demo_rows:
-        db.delete(row)
     db.commit()
 
 
@@ -134,7 +159,7 @@ def seed_sources_if_empty(db: Session):
 
 
 def sync_documents_from_tenders(db: Session):
-    # Rebuild documents table from real saved PDF paths only.
+    # Rebuild documents table from local or remote PDF paths.
     db.query(models.Document).delete()
     db.commit()
 
@@ -145,19 +170,32 @@ def sync_documents_from_tenders(db: Session):
             continue
         ai = tender.ai_summary if isinstance(tender.ai_summary, dict) else {}
         pdf_path = str(ai.get("pdf_saved_path", "")).strip()
-        if not pdf_path:
-            continue
-        path_obj = Path(pdf_path)
-        if not path_obj.exists() or path_obj.suffix.lower() != ".pdf":
+        remote_pdf_url = _resolve_remote_pdf_url(ai)
+
+        title = ""
+        size_kb = 0
+        status = "downloadable"
+
+        path_obj = Path(pdf_path) if pdf_path else None
+        if path_obj and path_obj.exists() and path_obj.suffix.lower() == ".pdf":
+            title = path_obj.name
+            size_kb = max(1, int(path_obj.stat().st_size / 1024))
+            status = "downloadable"
+        elif remote_pdf_url:
+            title = Path(urlparse(remote_pdf_url).path).name or f"{tender.tender_id}.pdf"
+            if not title.lower().endswith(".pdf"):
+                title = f"{title}.pdf"
+            size_kb = 0
+            status = "downloadable-remote"
+        else:
             continue
 
-        size_kb = max(1, int(path_obj.stat().st_size / 1024))
         rows.append(
             models.Document(
                 tender_ref=tender.tender_id,
-                title=path_obj.name,
+                title=title,
                 size_kb=size_kb,
-                status="downloadable",
+                status=status,
             )
         )
     if rows:
@@ -187,6 +225,127 @@ def _load_settings(db: Session):
         "email_notifications": _to_bool(kv.get("email_notifications", "false")),
         "telegram_notifications": _to_bool(kv.get("telegram_notifications", "true")),
     }
+
+
+def _normalized_ref_candidates(reference: str) -> list[str]:
+    raw = str(reference or "").strip()
+    if not raw:
+        return []
+
+    candidates = [raw]
+    decoded = unquote(raw).strip()
+    if decoded and decoded not in candidates:
+        candidates.append(decoded)
+    return candidates
+
+
+def _resolve_tender_by_reference(db: Session, reference: str):
+    candidates = _normalized_ref_candidates(reference)
+    if not candidates:
+        return None
+
+    for candidate in candidates:
+        row = db.query(models.Tender).filter(models.Tender.tender_id == candidate).first()
+        if row:
+            return row
+
+    for candidate in candidates:
+        row = db.query(models.Tender).filter(models.Tender.id == candidate).first()
+        if row:
+            return row
+
+    lowered = [candidate.lower() for candidate in candidates if candidate]
+    if lowered:
+        row = (
+            db.query(models.Tender)
+            .filter(models.Tender.tender_id.is_not(None))
+            .filter(func.lower(models.Tender.tender_id).in_(lowered))
+            .first()
+        )
+        if row:
+            return row
+
+    return None
+
+
+def _resolve_remote_pdf_url(ai_summary: dict) -> str:
+    if not isinstance(ai_summary, dict):
+        return ""
+
+    raw_pdf = str(ai_summary.get("save_as_pdf_url", "")).strip()
+    if not raw_pdf:
+        return ""
+
+    if raw_pdf.startswith(("http://", "https://")):
+        return raw_pdf
+
+    base = (
+        str(ai_summary.get("source_url", "")).strip()
+        or str(ai_summary.get("detail_url", "")).strip()
+        or "https://www.eprocure.gov.bd/resources/common/"
+    )
+    try:
+        return urljoin(base, raw_pdf)
+    except Exception:
+        return ""
+
+
+def _build_scraper_config(payload: "ScraperRunPayload", stop_checker=None) -> ScraperConfig:
+    keywords = []
+    for keyword in payload.keywords or []:
+        clean = str(keyword or "").strip()
+        if clean and clean not in keywords:
+            keywords.append(clean)
+
+    return ScraperConfig(
+        keyword=payload.keyword or "",
+        keywords=keywords or None,
+        proc_nature=payload.proc_nature or "",
+        publish_from=payload.publish_from or "01-Feb-2026",
+        publish_to=payload.publish_to or "",
+        max_pages=payload.max_pages or 1,
+        max_items_per_cycle=payload.max_items_per_cycle or 10,
+        max_deadline_window_days=max(1, min(int(payload.max_deadline_window_days or 30), 120)),
+        save_pdf=bool(payload.save_pdf),
+        headless=True,
+        stop_requested=stop_checker,
+    )
+
+
+def _snapshot_scraper_state():
+    with SCRAPER_LOCK:
+        return {
+            "running": bool(SCRAPER_STATE["running"]),
+            "stop_requested": bool(SCRAPER_STATE["stop_requested"]),
+            "job_id": SCRAPER_STATE["job_id"],
+            "started_at": SCRAPER_STATE["started_at"],
+            "finished_at": SCRAPER_STATE["finished_at"],
+            "last_result": SCRAPER_STATE["last_result"],
+            "last_error": SCRAPER_STATE["last_error"],
+            "params": SCRAPER_STATE["params"],
+        }
+
+
+def _run_scraper_job(payload: "ScraperRunPayload", job_id: str):
+    global SCRAPER_THREAD, SCRAPER_STOP_EVENT
+
+    stop_event = SCRAPER_STOP_EVENT
+    result = None
+    error_message = None
+    try:
+        config = _build_scraper_config(payload, stop_checker=(lambda: bool(stop_event and stop_event.is_set())))
+        result = run_scraper(config)
+    except Exception as exc:
+        error_message = str(exc)
+        result = {"status": "failed", "error": error_message}
+    finally:
+        with SCRAPER_LOCK:
+            SCRAPER_STATE["running"] = False
+            SCRAPER_STATE["finished_at"] = datetime.utcnow().isoformat()
+            SCRAPER_STATE["last_result"] = result
+            SCRAPER_STATE["last_error"] = error_message
+            SCRAPER_THREAD = None
+            SCRAPER_STOP_EVENT = None
 
 
 @app.on_event("startup")
@@ -235,12 +394,14 @@ class TenderIngestPayload(BaseModel):
 
 class ScraperRunPayload(BaseModel):
     keyword: Optional[str] = None
+    keywords: Optional[list[str]] = None
     proc_nature: Optional[str] = None
     publish_from: Optional[str] = "01-Feb-2026"
     publish_to: Optional[str] = None
     max_pages: Optional[int] = 1
     max_items_per_cycle: Optional[int] = 10
     save_pdf: Optional[bool] = True
+    max_deadline_window_days: Optional[int] = 30
 
 
 class PrunePayload(BaseModel):
@@ -262,25 +423,102 @@ app.add_middleware(
 )
 
 @app.get("/tenders")
-def read_tenders(db: Session = Depends(database.get_db)):
-    tenders = db.query(models.Tender).all()
-    return tenders
+def read_tenders(
+    limit: Optional[int] = None,
+    offset: int = 0,
+    sort_by: str = "deadline",
+    order: str = "desc",
+    db: Session = Depends(database.get_db),
+):
+    query = db.query(models.Tender)
+
+    sort_key = str(sort_by or "deadline").strip().lower()
+    direction = str(order or "desc").strip().lower()
+    reverse = direction == "desc"
+
+    if sort_key == "title":
+        query = query.order_by(models.Tender.title.desc() if reverse else models.Tender.title.asc())
+    elif sort_key == "priority":
+        priority_rank = case(
+            (models.Tender.priority == "Urgent", 4),
+            (models.Tender.priority == "High", 3),
+            (models.Tender.priority == "Medium", 2),
+            else_=1,
+        )
+        query = query.order_by(priority_rank.desc() if reverse else priority_rank.asc(), models.Tender.deadline.asc())
+    else:
+        query = query.order_by(
+            models.Tender.deadline.is_(None),
+            models.Tender.deadline.desc() if reverse else models.Tender.deadline.asc(),
+            models.Tender.title.asc(),
+        )
+
+    safe_offset = max(0, offset)
+    if safe_offset:
+        query = query.offset(safe_offset)
+
+    if limit is not None:
+        safe_limit = max(1, min(limit, 2000))
+        query = query.limit(safe_limit)
+
+    return query.all()
 
 
 @app.post("/scraper/run")
 def run_scraper_now(payload: ScraperRunPayload, db: Session = Depends(database.get_db)):
-    config = ScraperConfig(
-        keyword=payload.keyword or "",
-        proc_nature=payload.proc_nature or "",
-        publish_from=payload.publish_from or "01-Feb-2026",
-        publish_to=payload.publish_to or "",
-        max_pages=payload.max_pages or 1,
-        max_items_per_cycle=payload.max_items_per_cycle or 10,
-        save_pdf=bool(payload.save_pdf),
-        headless=True,
-    )
+    with SCRAPER_LOCK:
+        if SCRAPER_STATE["running"]:
+            raise HTTPException(status_code=409, detail="Scraper is already running")
+
+    config = _build_scraper_config(payload)
     result = run_scraper(config)
     return result
+
+
+@app.post("/scraper/start")
+def start_scraper(payload: ScraperRunPayload):
+    global SCRAPER_THREAD, SCRAPER_STOP_EVENT
+
+    with SCRAPER_LOCK:
+        if SCRAPER_STATE["running"]:
+            raise HTTPException(status_code=409, detail="Scraper is already running")
+
+        job_id = str(uuid.uuid4())
+        SCRAPER_STOP_EVENT = Event()
+        SCRAPER_STATE["running"] = True
+        SCRAPER_STATE["stop_requested"] = False
+        SCRAPER_STATE["job_id"] = job_id
+        SCRAPER_STATE["started_at"] = datetime.utcnow().isoformat()
+        SCRAPER_STATE["finished_at"] = None
+        SCRAPER_STATE["last_error"] = None
+        SCRAPER_STATE["params"] = payload.model_dump(exclude_none=True)
+
+        SCRAPER_THREAD = Thread(target=_run_scraper_job, args=(payload, job_id), daemon=True)
+        SCRAPER_THREAD.start()
+
+    return _snapshot_scraper_state()
+
+
+@app.post("/scraper/stop")
+def stop_scraper():
+    idle = False
+    with SCRAPER_LOCK:
+        if not SCRAPER_STATE["running"]:
+            idle = True
+        else:
+            SCRAPER_STATE["stop_requested"] = True
+            if SCRAPER_STOP_EVENT:
+                SCRAPER_STOP_EVENT.set()
+
+    if idle:
+        return {"status": "idle", **_snapshot_scraper_state()}
+
+    return {"status": "stopping", **_snapshot_scraper_state()}
+
+
+@app.get("/scraper/status")
+def scraper_status():
+    return _snapshot_scraper_state()
 
 
 @app.post("/tenders/prune")
@@ -321,10 +559,19 @@ def db_health(db: Session = Depends(database.get_db)):
 
 @app.get("/dashboard/stats")
 def dashboard_stats(db: Session = Depends(database.get_db)):
-    tenders = db.query(models.Tender).all()
-    total = len(tenders)
-    relevant = len([t for t in tenders if t.priority in {"High", "Urgent"}])
-    pending = len([t for t in tenders if t.status in {"new", "review"}])
+    total = db.query(func.count(models.Tender.id)).scalar() or 0
+    relevant = (
+        db.query(func.count(models.Tender.id))
+        .filter(models.Tender.priority.in_(["High", "Urgent"]))
+        .scalar()
+        or 0
+    )
+    pending = (
+        db.query(func.count(models.Tender.id))
+        .filter(models.Tender.status.in_(["new", "review", "PENDING_ANALYSIS"]))
+        .scalar()
+        or 0
+    )
     success_rate = f"{round((relevant / total) * 100)}%" if total > 0 else "0%"
     return {
         "total": total,
@@ -334,11 +581,28 @@ def dashboard_stats(db: Session = Depends(database.get_db)):
     }
 
 
+@app.get("/dashboard/sidebar-counts")
+def dashboard_sidebar_counts(db: Session = Depends(database.get_db)):
+    return {
+        "tenders": db.query(models.Tender).count(),
+        "alerts": db.query(models.Alert).filter(models.Alert.is_read.is_(False)).count(),
+        "documents": db.query(models.Document).count(),
+        "sources": db.query(models.Source).count(),
+    }
+
+
 @app.post("/ingest/tenders")
 def ingest_tenders(payload: TenderIngestPayload, db: Session = Depends(database.get_db)):
+    unique_items = {}
+    for item in payload.items:
+        key = str(item.tender_id or "").strip()
+        if not key:
+            continue
+        unique_items[key] = item
+
     inserted = 0
     updated = 0
-    for item in payload.items:
+    for item in unique_items.values():
         row = (
             db.query(models.Tender)
             .filter(models.Tender.tender_id == item.tender_id)
@@ -372,21 +636,27 @@ def ingest_tenders(payload: TenderIngestPayload, db: Session = Depends(database.
             inserted += 1
     db.commit()
     sync_documents_from_tenders(db)
-    return {"inserted": inserted, "updated": updated, "received": len(payload.items)}
+    return {"inserted": inserted, "updated": updated, "received": len(unique_items)}
+
+
+@app.get("/tenders/resolve")
+def resolve_tender(ref: str, db: Session = Depends(database.get_db)):
+    tender = _resolve_tender_by_reference(db, ref)
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+    return tender
 
 
 @app.get("/tenders/{tender_id}")
 def get_tender(tender_id: str, db: Session = Depends(database.get_db)):
-    tender = db.query(models.Tender).filter(models.Tender.tender_id == tender_id).first()
-    if not tender:
-        tender = db.query(models.Tender).filter(models.Tender.id == tender_id).first()
+    tender = _resolve_tender_by_reference(db, tender_id)
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
     return tender
 
 @app.get("/tenders/{tender_id}/summary")
 def get_summary(tender_id: str, db: Session = Depends(database.get_db)):
-    tender = db.query(models.Tender).filter(models.Tender.id == tender_id).first()
+    tender = _resolve_tender_by_reference(db, tender_id)
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
     return tender.ai_summary
@@ -394,7 +664,7 @@ def get_summary(tender_id: str, db: Session = Depends(database.get_db)):
 
 @app.patch("/tenders/{tender_id}/status")
 def update_status(tender_id: str, body: StatusUpdate, db: Session = Depends(database.get_db)):
-    tender = db.query(models.Tender).filter(models.Tender.id == tender_id).first()
+    tender = _resolve_tender_by_reference(db, tender_id)
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
     tender.status = body.status
@@ -486,7 +756,7 @@ def get_analysis(db: Session = Depends(database.get_db)):
         ai_summary = tender.ai_summary if isinstance(tender.ai_summary, dict) else {}
         results.append(
             {
-                "tender_id": tender.id,
+                "tender_id": tender.tender_id or tender.id,
                 "title": tender.title,
                 "priority": tender.priority,
                 "fit": ai_summary.get("fit", "Unknown"),
@@ -502,26 +772,21 @@ def get_sources(db: Session = Depends(database.get_db)):
     tender_count = db.query(models.Tender).count()
     response = []
     for item in rows:
-        item.records_detected = tender_count
-        item.last_sync = datetime.utcnow()
-        db.add(item)
         response.append(
             {
                 "id": item.id,
                 "name": item.name,
                 "type": item.source_type,
                 "status": item.status,
-                "records_detected": item.records_detected,
-                "last_sync": item.last_sync.isoformat(),
+                "records_detected": tender_count,
+                "last_sync": item.last_sync.isoformat() if item.last_sync else datetime.utcnow().isoformat(),
             }
         )
-    db.commit()
     return response
 
 
 @app.get("/documents")
 def get_documents(db: Session = Depends(database.get_db)):
-    sync_documents_from_tenders(db)
     rows = db.query(models.Document).order_by(models.Document.title.asc()).all()
     return [
         {
@@ -544,15 +809,37 @@ def download_document(tender_ref: str, db: Session = Depends(database.get_db)):
 
     ai = tender.ai_summary if isinstance(tender.ai_summary, dict) else {}
     pdf_path = str(ai.get("pdf_saved_path", "")).strip()
-    if not pdf_path:
+    if pdf_path:
+        file_path = Path(pdf_path)
+        if file_path.exists() and file_path.suffix.lower() == ".pdf":
+            return FileResponse(
+                path=str(file_path),
+                media_type="application/pdf",
+                filename=file_path.name,
+            )
+
+    remote_pdf_url = _resolve_remote_pdf_url(ai)
+    if not remote_pdf_url:
         raise HTTPException(status_code=404, detail="Document not available")
 
-    file_path = Path(pdf_path)
-    if not file_path.exists() or file_path.suffix.lower() != ".pdf":
-        raise HTTPException(status_code=404, detail="Document file missing")
+    try:
+        with httpx.Client(timeout=40.0, verify=False, follow_redirects=True) as client:
+            response = client.get(remote_pdf_url)
+            response.raise_for_status()
+            data = response.content or b""
+            content_type = str(response.headers.get("content-type", "")).lower()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch remote document: {exc}")
 
-    return FileResponse(
-        path=str(file_path),
+    if not data or ("application/pdf" not in content_type and not data.startswith(b"%PDF")):
+        raise HTTPException(status_code=502, detail="Remote document is not a valid PDF")
+
+    filename = Path(urlparse(remote_pdf_url).path).name or f"{tender_ref}.pdf"
+    if not filename.lower().endswith(".pdf"):
+        filename = f"{filename}.pdf"
+
+    return Response(
+        content=data,
         media_type="application/pdf",
-        filename=file_path.name,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

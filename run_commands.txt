@@ -1,0 +1,33 @@
+# Commands to Run the Automated Tender Intelligent System
+
+## Prerequisites
+- Ensure Python 3.12+ and Node.js are installed.
+- Virtual environment is set up at .venv
+
+## Backend Setup and Run
+1. Activate virtual environment and install dependencies:
+   & "e:\Projects\Web\Automated Tender Intelligent System\.venv\Scripts\Activate.ps1"
+   cd backend
+   pip install -r requirements.txt
+
+2. Run the backend server:
+   & "e:\Projects\Web\Automated Tender Intelligent System\.venv\Scripts\Activate.ps1"
+   cd backend
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+## Frontend Setup and Run
+1. Install frontend dependencies:
+   cd frontend
+   npm install
+
+2. Run the frontend development server:
+   cd frontend
+   npm run dev
+
+## Running Both Simultaneously
+- Open two terminals.
+- In first terminal: Run backend setup and server.
+- In second terminal: Run frontend setup and dev server.
+
+The backend will run on http://localhost:8000
+The frontend will run on http://localhost:5173 (default Vite port)

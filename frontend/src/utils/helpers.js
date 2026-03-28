@@ -1,4 +1,5 @@
 const EGP_BASE = 'https://www.eprocure.gov.bd/resources/common/';
+const EGP_LISTING_URL = 'https://www.eprocure.gov.bd/resources/common/AllTenders.jsp?h=t';
 
 const toStringSafe = (value) => String(value || '').trim();
 
@@ -13,6 +14,20 @@ export const buildTenderCanonicalUrl = (tenderId) => {
 	const id = toStringSafe(tenderId);
 	if (!id || !/^\d{5,}$/.test(id)) return '';
 	return `${EGP_BASE}ViewTender.jsp?id=${id}&h=t`;
+};
+
+export const getTenderReference = (tender) => {
+	return toStringSafe(tender?.tender_id || tender?.id);
+};
+
+export const buildTenderDetailsPath = (tenderOrRef) => {
+	const reference =
+		typeof tenderOrRef === 'string'
+			? toStringSafe(tenderOrRef)
+			: getTenderReference(tenderOrRef);
+
+	if (!reference) return '/tenders';
+	return `/tenders/details?ref=${encodeURIComponent(reference)}`;
 };
 
 export const resolveTenderSourceUrl = (tender) => {
@@ -33,7 +48,7 @@ export const resolveTenderSourceUrl = (tender) => {
 		}
 	}
 
-	return buildTenderCanonicalUrl(tender?.tender_id);
+	return buildTenderCanonicalUrl(tender?.tender_id) || EGP_LISTING_URL;
 };
 
 export const getTenderOrganization = (tender) => {

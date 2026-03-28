@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 
 // Feature Pages (Lazy loading for performance)
@@ -27,32 +27,26 @@ const PageLoader = () => (
 function App() {
   return (
     <Suspense fallback={<PageLoader />}>
-      <Layout>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Dashboard />} />
-          
-          {/* Tender Management */}
-          <Route path="/tenders" element={<Tenders />} />
-          <Route path="/tenders/:id" element={<TenderDetails />} />
-          
-          {/* AI & Analysis */}
-          <Route path="/analysis" element={<Analysis />} />
-          
-          {/* Documents & Sources */}
-          <Route path="/documents" element={<Documents />} />
-          <Route path="/sources" element={<Sources />} />
-          
-          {/* Notifications */}
-          <Route path="/alerts" element={<Alerts />} />
-          
-          {/* Configuration */}
-          <Route path="/settings" element={<Settings />} />
-          
-          {/* 404 Route */}
+      <Routes>
+        <Route element={<Layout />}>
+          <Route index element={<Dashboard />} />
+
+          <Route path="tenders">
+            <Route index element={<Tenders />} />
+            <Route path="details" element={<TenderDetails />} />
+            <Route path=":id" element={<TenderDetails />} />
+          </Route>
+
+          <Route path="analysis" element={<Analysis />} />
+          <Route path="documents" element={<Documents />} />
+          <Route path="sources" element={<Sources />} />
+          <Route path="alerts" element={<Alerts />} />
+          <Route path="settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Layout>
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </Suspense>
   );
 }
@@ -62,12 +56,12 @@ const NotFound = () => (
   <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
     <h1 className="text-6xl font-bold text-red-500 mb-4">404</h1>
     <p className="text-gray-400 text-lg mb-6">Page not found</p>
-    <a
-      href="/"
+    <Link
+      to="/"
       className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-colors"
     >
       Go to Dashboard
-    </a>
+    </Link>
   </div>
 );
 

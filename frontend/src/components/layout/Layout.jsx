@@ -2,12 +2,13 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Bell, UserCircle2 } from 'lucide-react';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Modal from '../ui/Modal';
 import useApiResource from '../../hooks/useApiResource';
 import { alertAPI } from '../../services/api';
 
-const Layout = ({ children }) => {
+const Layout = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const { data: notifications = [] } = useApiResource(alertAPI.getAll);
@@ -128,7 +129,7 @@ const Layout = ({ children }) => {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="p-4 sm:p-6 lg:p-8"
           >
-            {children}
+            <Outlet />
           </motion.div>
         </main>
       </div>
